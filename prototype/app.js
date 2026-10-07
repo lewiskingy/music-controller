@@ -121,6 +121,7 @@ async function showQueue() {
   try {
     const result = await client.queueItems(queue.queue_id, 0, 100);
     const items = Array.isArray(result) ? result : (result?.items || []);
+    if (view !== "Queue") return;
     drawRows(items, (item, index) => runCommand(() => client.playIndex(queue.queue_id, item.index ?? index)), "Queue empty");
   } catch (error) { setStatus("Queue unavailable: " + error.message); }
 }
@@ -134,6 +135,7 @@ async function showBrowse(reset = true) {
       ? await client.albumTracks(browsingParent.item_id, browsingParent.provider)
       : await client.browse(category, page * 50, 50);
     const items = Array.isArray(result) ? result : (result?.items || []);
+    if (view !== "Browse") return;
     if (!browsingParent) currentItems.push(...items); else currentItems = items;
     drawRows(currentItems, async (item) => {
       if (category === "albums" && !browsingParent) {
