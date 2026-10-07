@@ -1,0 +1,14 @@
+# Local secrets and runtime settings
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+sdkconfig
+sdkconfig.old
+build/
+dist/
+node_modules/
+.DS_Store
+__pycache__/
