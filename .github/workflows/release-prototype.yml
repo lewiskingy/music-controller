@@ -1,0 +1,56 @@
+name: Release controller prototype
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine version and validate source
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME}}"
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected semver tag vX.Y.Z"; exit 1; }
+          # Manual dispatch must release a tag already pointing at the checked-out commit.
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            git fetch --tags origin
+            [[ "$(git rev-parse "$version^{commit}")" == "$(git rev-parse HEAD)" ]] || { echo "Tag does not point to checked-out commit"; exit 1; }
+          fi
+          for f in index.html app.js styles.css; do test -s "prototype/$f"; done
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build immutable static artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf dist/music-controller-${VERSION}.tar.gz -C prototype .
+          (cd dist && sha256sum music-controller-${VERSION}.tar.gz > music-controller-${VERSION}.tar.gz.sha256)
+          tar -tzf dist/music-controller-${VERSION}.tar.gz | grep -q './index.html'
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite immutable assets."
+            exit 1
+          fi
+          gh release create "$VERSION" \
+            "dist/music-controller-${VERSION}.tar.gz" \
+            "dist/music-controller-${VERSION}.tar.gz.sha256" \
+            --title "Music Controller $VERSION" \
+            --notes "Versioned static controller prototype; see repository README for current capabilities."
