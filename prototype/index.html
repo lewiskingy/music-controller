@@ -15,16 +15,22 @@
       <div class="details">
         <p class="eyebrow">NOW PLAYING · MUSIC ASSISTANT</p>
         <h1 id="track">Not connected</h1>
-        <p id="artist">Sign in to Music Assistant</p>
+        <p id="artist">Connecting to Music Assistant</p>
         <p id="album"></p>
         <div class="transport">
           <button id="prev" type="button" disabled aria-label="Previous track">⏮</button>
           <button id="toggle" type="button" disabled aria-label="Pause">⏸</button>
-          <button id="next" type="button" disabled aria-label="Next track">⏭</button>
+          <button id="next" type="button" disabled aria-label="Next track">⏭</button><button id="stop" type="button" disabled aria-label="Stop">⏹</button>
         </div>
         <label class="volume" for="volume">Volume <output id="volumeValue">35%</output></label>
         <input id="volume" type="range" min="0" max="100" value="35" disabled>
       </div>
+    </section>
+    <section id="panel" class="panel" hidden>
+      <div class="panel-head"><h2 id="panel-title">Queue</h2><button id="panel-back" type="button">Back</button></div>
+      <div id="browse-tabs" hidden><button data-category="albums">Albums</button><button data-category="artists">Artists</button><button data-category="playlists">Playlists</button></div>
+      <div id="panel-items" class="panel-items"></div>
+      <button id="more" type="button" hidden>Load more</button>
     </section>
     <nav aria-label="Controller sections">
       <button type="button" data-view="Now Playing" aria-current="page">Now Playing</button>
