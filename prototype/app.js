@@ -69,7 +69,6 @@ client.onEvent = (event) => {
 };
 client.onDisconnect = () => {
   authenticated = false;
-  $("login").hidden = false;
   setStatus("Disconnected. Reload to reconnect.");
 };
 $("player").addEventListener("change", (event) => {
@@ -77,28 +76,35 @@ $("player").addEventListener("change", (event) => {
   localStorage.setItem("music-controller-player", selected);
   updateView();
 });
-$("login").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = $("login").querySelector("button");
-  button.disabled = true;
-  setStatus("Signing in…");
-  try {
-    await client.login($("username").value, $("password").value);
-    $("password").value = "";
-    authenticated = true;
-    await refresh();
-    $("login").hidden = true;
-    setStatus("Live Music Assistant connection · Read-only Now Playing");
-  } catch (error) {
-    setStatus("Unable to connect: " + error.message);
-  } finally { button.disabled = false; }
-});
 document.querySelectorAll("nav button").forEach((button) => {
   button.addEventListener("click", () => setStatus(button.dataset.view + " will follow in a later milestone."));
 });
-(async () => {
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+client.onReady = async () => {
   try {
-    await client.connect();
-    setStatus("Connected to Music Assistant. Sign in to view players.");
-  } catch (error) { setStatus("Connection failed: " + error.message); }
-})();
+    authenticated = true;
+    await refresh();
+    reconnectDelay = 1000;
+    setStatus("Live Music Assistant connection · Read-only Now Playing");
+  } catch (error) {
+    setStatus("Unable to load player state: " + error.message);
+  }
+};
+client.onDisconnect = () => {
+  authenticated = false;
+  setStatus("Music Assistant disconnected. Reconnecting…");
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+};
+async function connect() {
+  try { await client.connect(); }
+  catch (error) {
+    setStatus("Connection failed: " + error.message + ". Retrying…");
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  }
+}
+connect();
