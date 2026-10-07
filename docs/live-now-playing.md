@@ -1,27 +1,62 @@
-# Live Now Playing prototype
+# Household controller — live playback, queue and catalogue
 
-This milestone replaces sample metadata with real Music Assistant player and queue state.
+## Tested integration baseline (Atlas, October 2026)
 
-## Connection
+The deployed read-only Now Playing prototype successfully displayed live Music
+Assistant data through the following path:
 
-The prototype uses a same-origin WebSocket at `/controller/ma/ws`. Atlas Caddy must route this LAN-only endpoint to Music Assistant's `/ws` on port 8095. Artwork uses the similarly restricted `/controller/ma/image` route. No public MA API route is introduced.
+```text
+LAN browser -> Caddy /controller/ma/ws -> Atlas appliance gateway
+           -> Music Assistant host port 8095 -> players and queues
+```
 
-Users sign in with their **Music Assistant** username and password. Credentials are sent to Music Assistant over the WebSocket authentication command, and are not stored in the public repository, localStorage or a config file. A token is held only in the current connection. Browser reload requires signing in again.
+The gateway authenticates using `/opt/atlas-secrets/music-controller.env`
+managed on Atlas; the browser does not receive credentials. The gateway was
+initially unable to reach MA because Atlas UFW blocked Docker-to-host TCP 8095.
+Allowing the existing Docker subnet to reach that port resolved connectivity.
+Port 8097 remains separately required for Sonos/Cast to fetch audio streams.
+These are Atlas deployment concerns, not settings for this public repository.
 
-## Scope
+## This iteration (requires live validation)
 
-- Select an available Music Assistant player.
-- Show track, artist, album and artwork from the selected player's current queue/media.
-- Refresh state on player/queue events.
-- Controls are intentionally disabled until playback command semantics have been validated, especially [Sonos Pause #587](https://github.com/lewiskingy/atlas/issues/587).
-- Browse, search and queue navigation are future milestones.
+- Transport: play, pause, explicit stop, next, previous and volume for the
+  selected player. Buttons disable during requests and errors are surfaced.
+- Sonos: **Pause is disabled while playing** pending investigation of
+  [Atlas #587](https://github.com/lewiskingy/atlas/issues/587); Stop remains
+  available. No implicit substitution of Stop for Pause.
+- Queue: show current queue items and select an index.
+- Browse: paginated albums, artists and playlists; album track drill-down.
+  Playback requires a selected player and a playable Music Assistant URI.
+- Live state: Music Assistant remains the source of truth. UI refreshes on
+  player/queue events rather than assuming commands succeeded.
+- No new media catalogue, database or queue logic on Atlas.
 
-## Deployment
+The exact Music Assistant command signatures and catalogue response shapes
+must be validated against the deployed server before release promotion. The
+implementation is a functional integration candidate, not a claim of successful
+live testing for every provider/player.
 
-Merge the Atlas Caddy proxy PR first, then merge this project PR. Publish the next versioned release (e.g. `v0.2.0`), change Atlas's pinned release version and run `git-deploy.sh`. Do not overwrite `v0.1.0`.
+## Security boundary
 
-Test on home Wi-Fi at `https://music.theflat.me.uk/controller/`. Verify that remote access to both API paths returns HTTP 403. If the client shows an authentication or data-shape error, collect the browser console and Music Assistant logs to reconcile the installed MA version's protocol.
+Caddy restricts controller paths to the home LAN. Atlas gateway authenticates
+upstream with a dedicated Music Assistant account and validates each allowed
+command and its arguments; arbitrary API commands are not forwarded. Because
+the controller intentionally has no household login, anyone on the permitted
+LAN can control playback. Keep the gateway private, do not expose its container
+port or the MA server directly to WAN, and never commit secrets.
 
-## Security
+## Release and deployment
 
-No MA administrator token is injected by Caddy. MA validates each login. Caddy's LAN restriction protects both the static application and WebSocket/image endpoints. Avoid granting the controller user administrator privileges.
+1. Merge the controller and companion Atlas gateway PR after CI passes.
+2. Publish a **new** semver tag/release with the verified static artifacts.
+3. Update `deploy/music-controller.version` in Atlas.
+4. Deploy with `git-deploy.sh`.
+5. Test Now Playing, Stop, play, skip, volume, queue selection, album drill-down,
+   and external state changes on a non-Sonos and a Sonos player.
+6. Confirm Navidrome public root is unaffected and protected controller routes
+   remain inaccessible from mobile data.
+
+## Further work
+
+Search across providers, artist-to-album drill-down, favourites, device
+capability-specific controls, and native ESP32 LVGL port are later milestones.
