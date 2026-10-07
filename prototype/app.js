@@ -20,7 +20,7 @@ function updateView() {
   $("volume").value = player?.volume_level ?? 0;
   $("volumeValue").textContent = (player?.volume_level ?? 0) + "%";
   $("toggle").textContent = player?.state === "playing" ? "⏸" : "▶";
-  $("room").textContent = player?.name || "Music Assistant";
+
   // This milestone is read-only; do not offer controls until transport semantics
   // are verified (particularly Sonos pause behaviour in Atlas #587).
   for (const id of ["prev", "toggle", "next", "volume"]) $(id).disabled = true;
@@ -34,7 +34,7 @@ function renderPlayers() {
     option.textContent = player.name;
     $("player").append(option);
   }
-  const ids = players.map((p) => p.player_id);
+  const ids = Array.from($("player").options, (option) => option.value);
   selected = ids.includes(previous) ? previous : (ids.includes(localStorage.getItem("music-controller-player")) ? localStorage.getItem("music-controller-player") : $("player").options[0]?.value || "");
   $("player").value = selected;
   updateView();
