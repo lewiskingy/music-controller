@@ -63,7 +63,8 @@ jobs:
                printf '%s\n' "$existing" | grep -Fxq "$checksum"; then
               if printf '%s\n' "$existing" | grep -Fxq "$archive" &&
                  printf '%s\n' "$existing" | grep -Fxq "$checksum"; then
-                echo "Both assets already exist; refusing to overwrite."
+                echo "Both assets already exist; no changes needed."
+                exit 0
               else
                 echo "Partial assets already exist; refusing to create an inconsistent pair." >&2
               fi
