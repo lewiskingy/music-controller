@@ -5,25 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Music Controller · Prototype</title>
   <link rel="stylesheet" href="./styles.css">
-  <script src="./app.js" defer></script>
+  <script type="module" src="./app.js"></script>
 </head>
 <body>
   <main class="device" aria-label="Music controller prototype">
-    <header class="topbar"><strong>Music Controller</strong><span id="room">Living Room · Demo</span></header>
+    <header class="topbar"><strong>Music Controller</strong><label for="player">Player <select id="player"><option value="">Connect first</option></select></label></header>
     <section class="screen">
       <div id="art" class="art" aria-label="Placeholder album artwork"><span>♪</span></div>
       <div class="details">
-        <p class="eyebrow">NOW PLAYING · SAMPLE DATA</p>
-        <h1 id="track">Tejano Blue</h1>
-        <p id="artist">Cigarettes After Sex</p>
-        <p id="album">X's</p>
+        <p class="eyebrow">NOW PLAYING · MUSIC ASSISTANT</p>
+        <h1 id="track">Not connected</h1>
+        <p id="artist">Sign in to Music Assistant</p>
+        <p id="album"></p>
         <div class="transport">
-          <button id="prev" type="button" aria-label="Previous track">⏮</button>
-          <button id="toggle" type="button" aria-label="Pause">⏸</button>
-          <button id="next" type="button" aria-label="Next track">⏭</button>
+          <button id="prev" type="button" disabled aria-label="Previous track">⏮</button>
+          <button id="toggle" type="button" disabled aria-label="Pause">⏸</button>
+          <button id="next" type="button" disabled aria-label="Next track">⏭</button>
         </div>
         <label class="volume" for="volume">Volume <output id="volumeValue">35%</output></label>
-        <input id="volume" type="range" min="0" max="100" value="35">
+        <input id="volume" type="range" min="0" max="100" value="35" disabled>
       </div>
     </section>
     <nav aria-label="Controller sections">
@@ -32,7 +32,12 @@
       <button type="button" data-view="Queue">Queue</button>
       <button type="button" data-view="Players">Players</button>
     </nav>
-    <p id="status" role="status">Demo only — controls update sample state, not Music Assistant.</p>
+    <form id="login" class="login">
+      <label>Music Assistant username <input id="username" autocomplete="username" required></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Connect</button>
+    </form>
+    <p id="status" role="status">Connect to Music Assistant to see live playback.</p>
   </main>
 </body>
 </html>
