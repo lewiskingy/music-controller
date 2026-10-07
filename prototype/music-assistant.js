@@ -31,7 +31,11 @@ export class MusicAssistantClient {
           const entry = this.pending.get(String(msg.message_id));
           this.pending.delete(String(msg.message_id));
           clearTimeout(entry.timeout);
-          if (msg.error || msg.error_code) entry.reject(new Error(msg.error?.message || msg.error || "API error"));
+          if (msg.error || msg.error_code) {
+            const error = typeof msg.error === "string" ? msg.error
+              : (msg.error?.message || msg.error?.code || msg.error_code || "API error");
+            entry.reject(new Error(String(error).slice(0, 160)));
+          }
           else entry.resolve(msg.result);
         } else if (msg.event === "gateway/ready") this.onReady();
         else if (msg.event) this.onEvent(msg);
