@@ -115,16 +115,19 @@ function drawRows(items, onSelect, caption) {
 }
 async function showQueue() {
   const queue = queueForPlayer(selectedPlayer());
+  if (view !== "Queue") return;
   $("panel-title").textContent = "Queue · " + (selectedPlayer()?.name || "");
   if (!queue) { drawRows([], () => {}, "No queue for this player"); return; }
   try {
     const result = await client.queueItems(queue.queue_id, 0, 100);
     const items = Array.isArray(result) ? result : (result?.items || []);
+    if (view !== "Queue") return;
     drawRows(items, (item, index) => runCommand(() => client.playIndex(queue.queue_id, item.index ?? index)), "Queue empty");
   } catch (error) { setStatus("Queue unavailable: " + error.message); }
 }
 async function showBrowse(reset = true) {
-  if (reset) { page = 0; currentItems = []; browsingParent = null; }
+  if (view !== "Browse") return;
+  if (reset) { page = 0; currentItems = []; browsingParent = null; $("panel-items").scrollTop = 0; }
   $("browse-tabs").hidden = false;
   $("panel-title").textContent = browsingParent?.name || category[0].toUpperCase() + category.slice(1);
   try {
@@ -132,6 +135,7 @@ async function showBrowse(reset = true) {
       ? await client.albumTracks(browsingParent.item_id, browsingParent.provider)
       : await client.browse(category, page * 50, 50);
     const items = Array.isArray(result) ? result : (result?.items || []);
+    if (view !== "Browse") return;
     if (!browsingParent) currentItems.push(...items); else currentItems = items;
     drawRows(currentItems, async (item) => {
       if (category === "albums" && !browsingParent) {
@@ -156,15 +160,33 @@ document.querySelectorAll("[data-category]").forEach(button => button.addEventLi
 }));
 function switchView(next) {
   view = next;
-  $("panel").hidden = next === "Now Playing" || next === "Players";
+  const isHome = next === "Now Playing";
+  $("now-playing").hidden = !isHome;
+  $("panel").hidden = isHome;
+  $("home").hidden = isHome;
+  $("screen-label").textContent = next;
   $("browse-tabs").hidden = next !== "Browse";
-  document.querySelectorAll("nav [data-view]").forEach(button =>
-    button.setAttribute("aria-current", button.dataset.view === next ? "page" : "false"));
+  $("players-controls").hidden = next !== "Players";
+  $("search-controls").hidden = next !== "Search";
+  $("more").hidden = true;
+  $("panel-items").replaceChildren();
+  $("panel-items").scrollTop = 0;
+  $("panel-title").textContent = next;
   if (next === "Queue") showQueue();
   else if (next === "Browse") showBrowse();
-  else if (next === "Players") { $("player").focus(); setStatus("Choose a player from the top menu"); }
+  else if (next === "Players") {
+    const options = Array.from($("player").options);
+    drawRows(options.map(option => ({name: option.textContent, player_id: option.value})), item => {
+      $("player").value = item.player_id;
+      $("player").dispatchEvent(new Event("change"));
+      switchView("Now Playing");
+    }, "No players available");
+  } else if (next === "Search") {
+    drawRows([], () => {}, "Search integration is next; no results yet.");
+  }
 }
-document.querySelectorAll("nav button").forEach(button => {
+$("home").addEventListener("click", () => switchView("Now Playing"));
+document.querySelectorAll(".home-actions button").forEach(button => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 let reconnectDelay = 1000;

@@ -1,44 +1,65 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Music Controller · Prototype</title>
-  <link rel="stylesheet" href="./styles.css">
-  <script type="module" src="./app.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Music Controller</title>
+<link rel="stylesheet" href="./styles.css">
+<script type="module" src="./app.js"></script>
 </head>
 <body>
-  <main class="device" aria-label="Music controller prototype">
-    <header class="topbar"><strong>Music Controller</strong><label for="player">Player <select id="player"><option value="">Connect first</option></select></label></header>
-    <section class="screen">
-      <div id="art" class="art" aria-label="Placeholder album artwork"><span>♪</span></div>
+<main class="device" aria-label="Music Controller">
+  <header class="topbar">
+    <strong>Music Controller</strong>
+    <span id="screen-label">Now Playing</span>
+    <button id="home" type="button" hidden aria-label="Back to Now Playing">← Now Playing</button>
+  </header>
+  <section id="now-playing" class="view" aria-label="Now Playing">
+    <div class="screen">
+      <div id="art" class="art" aria-label="Album artwork">♪</div>
       <div class="details">
-        <p class="eyebrow">NOW PLAYING · MUSIC ASSISTANT</p>
-        <h1 id="track">Not connected</h1>
-        <p id="artist">Connecting to Music Assistant</p>
-        <p id="album"></p>
+        <p class="eyebrow">NOW PLAYING</p>
+        <h1 id="track">Connecting…</h1>
+        <p id="artist"></p><p id="album"></p>
         <div class="transport">
-          <button id="prev" type="button" disabled aria-label="Previous track">⏮</button>
-          <button id="toggle" type="button" disabled aria-label="Pause">⏸</button>
-          <button id="next" type="button" disabled aria-label="Next track">⏭</button><button id="stop" type="button" disabled aria-label="Stop">⏹</button>
+          <button id="prev" disabled aria-label="Previous">⏮</button>
+          <button id="toggle" disabled aria-label="Play or pause">▶</button>
+          <button id="next" disabled aria-label="Next">⏭</button>
+          <button id="stop" disabled aria-label="Stop">⏹</button>
         </div>
-        <label class="volume" for="volume">Volume <output id="volumeValue">35%</output></label>
-        <input id="volume" type="range" min="0" max="100" value="35" disabled>
+        <label class="volume" for="volume">Volume <output id="volumeValue">0%</output></label>
+        <input id="volume" type="range" min="0" max="100" value="0" disabled>
       </div>
-    </section>
-    <section id="panel" class="panel" hidden>
-      <div class="panel-head"><h2 id="panel-title">Queue</h2><button id="panel-back" type="button">Back</button></div>
-      <div id="browse-tabs" hidden><button data-category="albums">Albums</button><button data-category="artists">Artists</button><button data-category="playlists">Playlists</button></div>
-      <div id="panel-items" class="panel-items"></div>
-      <button id="more" type="button" hidden>Load more</button>
-    </section>
-    <nav aria-label="Controller sections">
-      <button type="button" data-view="Now Playing" aria-current="page">Now Playing</button>
-      <button type="button" data-view="Browse">Browse</button>
-      <button type="button" data-view="Queue">Queue</button>
-      <button type="button" data-view="Players">Players</button>
+    </div>
+    <nav class="home-actions" aria-label="Open a screen">
+      <button data-view="Queue">Queue</button>
+      <button data-view="Browse">Browse</button>
+      <button data-view="Search">Search</button>
+      <button data-view="Players">Players</button>
     </nav>
-    <p id="status" role="status">Connecting to Music Assistant…</p>
-  </main>
+  </section>
+  <section id="panel" class="view panel" hidden aria-label="Selected screen">
+    <div class="panel-head">
+      <h2 id="panel-title">Queue</h2>
+      <button id="panel-back" type="button">← Back</button>
+    </div>
+    <div id="browse-tabs" hidden>
+      <button data-category="albums">Albums</button>
+      <button data-category="artists">Artists</button>
+      <button data-category="playlists">Playlists</button>
+    </div>
+    <div id="search-controls" hidden>
+      <label for="search-input">Search music</label>
+      <input id="search-input" placeholder="Search coming soon" disabled>
+    </div>
+    <div id="players-controls" hidden>
+      <label for="player">Select player</label>
+      <select id="player"><option value="">Connecting…</option></select>
+    </div>
+    <div id="panel-items" class="panel-items" tabindex="0" aria-label="Scrollable results"></div>
+    <button id="more" type="button" hidden>Load more</button>
+  </section>
+  <p id="status" role="status">Connecting to Music Assistant…</p>
+</main>
 </body>
 </html>
