@@ -152,7 +152,7 @@ async function showBrowse(reset = true) {
 }
 $("more").addEventListener("click", async () => { page++; await showBrowse(false); });
 $("panel-back").addEventListener("click", () => {
-  if (browsingParent) { browsingParent = null; showBrowse(); }
+  if (view === "Browse" && browsingParent) { browsingParent = null; showBrowse(); }
   else switchView("Now Playing");
 });
 document.querySelectorAll("[data-category]").forEach(button => button.addEventListener("click", () => {
@@ -163,7 +163,6 @@ function switchView(next) {
   const isHome = next === "Now Playing";
   $("now-playing").hidden = !isHome;
   $("panel").hidden = isHome;
-  $("home").hidden = isHome;
   $("screen-label").textContent = next;
   $("browse-tabs").hidden = next !== "Browse";
   $("players-controls").hidden = next !== "Players";
@@ -185,7 +184,6 @@ function switchView(next) {
     drawRows([], () => {}, "Search integration is next; no results yet.");
   }
 }
-$("home").addEventListener("click", () => switchView("Now Playing"));
 document.querySelectorAll(".home-actions button").forEach(button => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
