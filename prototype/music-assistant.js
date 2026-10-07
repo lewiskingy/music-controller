@@ -51,5 +51,22 @@ export class MusicAssistantClient {
   }
   async players() { return this.command("players/all"); }
   async queues() { return this.command("player_queues/all"); }
+  queueItems(queue_id, offset = 0, limit = 50) { return this.command("player_queues/items", {queue_id, offset, limit}); }
+  transport(action, player_id) {
+    if (!["play", "pause", "stop", "next", "previous"].includes(action)) throw new Error("Unsupported transport");
+    return this.command("players/cmd/" + action, {player_id});
+  }
+  volume(player_id, volume_level) { return this.command("players/cmd/volume_set", {player_id, volume_level}); }
+  playIndex(queue_id, index) { return this.command("player_queues/play_index", {queue_id, index}); }
+  browse(type, offset = 0, limit = 50) {
+    if (!["albums", "artists", "playlists"].includes(type)) throw new Error("Unsupported catalogue");
+    return this.command("music/" + type, {offset, limit});
+  }
+  albumTracks(item_id, provider_instance_id_or_domain) {
+    return this.command("music/album_tracks", {item_id, provider_instance_id_or_domain});
+  }
+  playMedia(queue_id, media, option = "replace") {
+    return this.command("player_queues/play_media", {queue_id, media, option});
+  }
   close() { this.socket?.close(); }
 }
