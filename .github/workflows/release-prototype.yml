@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Determine version and validate source
         shell: bash
         env:
@@ -27,7 +29,8 @@ jobs:
           # Manual dispatch must release a tag already pointing at the checked-out commit.
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             git fetch --tags origin
-            [[ "$(git rev-parse "$version^{commit}")" == "$(git rev-parse HEAD)" ]] || { echo "Tag does not point to checked-out commit"; exit 1; }
+            # Build from the immutable release tag, not the workflow dispatch branch.
+            git checkout --detach "$version"
           fi
           for f in index.html app.js styles.css; do test -s "prototype/$f"; done
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -36,7 +39,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          tar -czf dist/music-controller-${VERSION}.tar.gz -C prototype .
+          # Deterministic archive for a given tag; do not embed build timestamps.
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf dist/music-controller-${VERSION}.tar.gz -C prototype .
           (cd dist && sha256sum music-controller-${VERSION}.tar.gz > music-controller-${VERSION}.tar.gz.sha256)
           tar -tzf dist/music-controller-${VERSION}.tar.gz | grep -q './index.html'
       - name: Publish GitHub release
@@ -45,12 +49,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          archive="music-controller-${VERSION}.tar.gz"
+          checksum="${archive}.sha256"
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Release already exists; refusing to overwrite immutable assets."
-            exit 1
+            echo "Existing release detected; checking for missing assets."
+            existing="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+            if printf '%s\n' "$existing" | grep -Fxq "$archive" ||
+               printf '%s\n' "$existing" | grep -Fxq "$checksum"; then
+              if printf '%s\n' "$existing" | grep -Fxq "$archive" &&
+                 printf '%s\n' "$existing" | grep -Fxq "$checksum"; then
+                echo "Both assets already exist; refusing to overwrite."
+              else
+                echo "Partial assets already exist; refusing to create an inconsistent pair." >&2
+              fi
+              exit 1
+            fi
+            gh release upload "$VERSION" "dist/$archive" "dist/$checksum"
+          else
+            gh release create "$VERSION" \
+              "dist/$archive" "dist/$checksum" \
+              --title "Music Controller $VERSION" \
+              --notes "Versioned static controller prototype; see repository README for current capabilities."
           fi
-          gh release create "$VERSION" \
-            "dist/music-controller-${VERSION}.tar.gz" \
-            "dist/music-controller-${VERSION}.tar.gz.sha256" \
-            --title "Music Controller $VERSION" \
-            --notes "Versioned static controller prototype; see repository README for current capabilities."
