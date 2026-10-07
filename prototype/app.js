@@ -17,6 +17,20 @@ function updateView() {
   $("artist").textContent = item?.artists?.map((artist) => artist.name).join(", ") ||
     player?.current_media?.artist || "";
   $("album").textContent = item?.album?.name || player?.current_media?.album || "";
+  const imagePath = item?.image?.path || item?.metadata?.images?.[0]?.path ||
+    player?.current_media?.image_url || "";
+  const art = $("art");
+  art.replaceChildren();
+  if (imagePath) {
+    const img = document.createElement("img");
+    img.alt = "Album artwork";
+    const url = new URL("./ma/image", window.location.href);
+    url.searchParams.set("path", imagePath);
+    url.searchParams.set("size", "320");
+    img.src = url.toString();
+    img.onerror = () => { art.textContent = "♪"; };
+    art.append(img);
+  } else art.textContent = "♪";
   $("volume").value = player?.volume_level ?? 0;
   $("volumeValue").textContent = (player?.volume_level ?? 0) + "%";
   $("toggle").textContent = player?.state === "playing" ? "⏸" : "▶";
