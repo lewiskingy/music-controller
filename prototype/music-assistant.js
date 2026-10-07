@@ -7,6 +7,7 @@ export class MusicAssistantClient {
     this.sequence = 0;
     this.onEvent = () => {};
     this.onDisconnect = () => {};
+    this.onReady = () => {};
   }
   async connect() {
     const url = new URL(this.path, window.location.href);
@@ -32,7 +33,8 @@ export class MusicAssistantClient {
           clearTimeout(entry.timeout);
           if (msg.error || msg.error_code) entry.reject(new Error(msg.error?.message || msg.error || "API error"));
           else entry.resolve(msg.result);
-        } else if (msg.event) this.onEvent(msg);
+        } else if (msg.event === "gateway/ready") this.onReady();
+        else if (msg.event) this.onEvent(msg);
       };
     });
   }
@@ -47,13 +49,6 @@ export class MusicAssistantClient {
       this.socket.send(JSON.stringify({ message_id, command, args }));
     });
   }
-  async login(username, password) {
-    const response = await this.command("auth/login", { username, password, device_name: "Music Controller Prototype" });
-    if (!response?.success || !response.access_token) throw new Error(response?.error || "Login failed");
-    await this.command("auth", { token: response.access_token });
-    return response.access_token;
-  }
-  async authenticate(token) { return this.command("auth", { token }); }
   async players() { return this.command("players/all"); }
   async queues() { return this.command("player_queues/all"); }
   close() { this.socket?.close(); }
