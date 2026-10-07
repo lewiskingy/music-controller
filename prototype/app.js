@@ -3,6 +3,7 @@ import { MusicAssistantClient } from "./music-assistant.js";
 const $ = (id) => document.getElementById(id);
 const client = new MusicAssistantClient("./ma/ws");
 let players = [], queues = [], selected = "", authenticated = false, refreshTimer = null;
+let view = "Now Playing", category = "albums", page = 0, currentItems = [], browsingParent = null, busy = false;
 const setStatus = (message) => { $("status").textContent = message; };
 function selectedPlayer() { return players.find((player) => player.player_id === selected); }
 function queueForPlayer(player) {
@@ -35,9 +36,14 @@ function updateView() {
   $("volumeValue").textContent = (player?.volume_level ?? 0) + "%";
   $("toggle").textContent = player?.state === "playing" ? "⏸" : "▶";
 
-  // This milestone is read-only; do not offer controls until transport semantics
-  // are verified (particularly Sonos pause behaviour in Atlas #587).
-  for (const id of ["prev", "toggle", "next", "volume"]) $(id).disabled = true;
+  const enabled = authenticated && player?.available !== false && !!player;
+  for (const id of ["prev", "toggle", "next", "stop", "volume"]) $(id).disabled = !enabled || busy;
+  // Known Sonos Pause queue hopping (#587): offer Stop instead of Pause on
+  // native Sonos until a verified fix is available.
+  const sonos = /sonos/i.test([player?.provider, player?.type, player?.device_info?.manufacturer].join(" "));
+  $("toggle").disabled = !enabled || busy || (sonos && player?.state === "playing");
+  $("toggle").title = sonos && player?.state === "playing" ? "Use Stop for Sonos until pause issue is resolved" : "";
+  $("stop").disabled = !enabled || busy;
 }
 function renderPlayers() {
   const previous = selected;
@@ -59,6 +65,7 @@ async function refresh() {
   players = Array.isArray(newPlayers) ? newPlayers : [];
   queues = Array.isArray(newQueues) ? newQueues : [];
   renderPlayers();
+  if (view === "Queue") await showQueue();
 }
 function retryLater() {
   if (refreshTimer) clearTimeout(refreshTimer);
@@ -76,8 +83,89 @@ $("player").addEventListener("change", (event) => {
   localStorage.setItem("music-controller-player", selected);
   updateView();
 });
-document.querySelectorAll("nav button").forEach((button) => {
-  button.addEventListener("click", () => setStatus(button.dataset.view + " will follow in a later milestone."));
+async function runCommand(task) {
+  if (!authenticated || busy) return;
+  busy = true;
+  updateView();
+  try { await task(); await refresh(); setStatus("Music Assistant updated"); }
+  catch (error) { setStatus("Command failed: " + error.message); }
+  finally { busy = false; updateView(); }
+}
+$("toggle").addEventListener("click", () => {
+  const player = selectedPlayer(); if (!player) return;
+  runCommand(() => client.transport(player.state === "playing" ? "pause" : "play", selected));
+});
+$("stop").addEventListener("click", () => runCommand(() => client.transport("stop", selected)));
+for (const [id, action] of [["prev", "previous"], ["next", "next"]]) {
+  $(id).addEventListener("click", () => runCommand(() => client.transport(action, selected)));
+}
+$("volume").addEventListener("change", (event) => {
+  runCommand(() => client.volume(selected, Number(event.target.value)));
+});
+function drawRows(items, onSelect, caption) {
+  const target = $("panel-items"); target.replaceChildren();
+  if (!items.length) { target.textContent = caption || "No items available"; return; }
+  items.forEach((item, index) => {
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "item-row";
+    row.textContent = item.name || item.media_item?.name || item.media_item?.title || item.title || "Untitled";
+    row.addEventListener("click", () => onSelect(item, index));
+    target.append(row);
+  });
+}
+async function showQueue() {
+  const queue = queueForPlayer(selectedPlayer());
+  $("panel-title").textContent = "Queue · " + (selectedPlayer()?.name || "");
+  if (!queue) { drawRows([], () => {}, "No queue for this player"); return; }
+  try {
+    const result = await client.queueItems(queue.queue_id, 0, 100);
+    const items = Array.isArray(result) ? result : (result?.items || []);
+    drawRows(items, (item, index) => runCommand(() => client.playIndex(queue.queue_id, item.index ?? index)), "Queue empty");
+  } catch (error) { setStatus("Queue unavailable: " + error.message); }
+}
+async function showBrowse(reset = true) {
+  if (reset) { page = 0; currentItems = []; browsingParent = null; }
+  $("browse-tabs").hidden = false;
+  $("panel-title").textContent = browsingParent?.name || category[0].toUpperCase() + category.slice(1);
+  try {
+    const result = browsingParent
+      ? await client.albumTracks(browsingParent.item_id, browsingParent.provider)
+      : await client.browse(category, page * 50, 50);
+    const items = Array.isArray(result) ? result : (result?.items || []);
+    if (!browsingParent) currentItems.push(...items); else currentItems = items;
+    drawRows(currentItems, async (item) => {
+      if (category === "albums" && !browsingParent) {
+        browsingParent = item; await showBrowse(false); return;
+      }
+      const queue = queueForPlayer(selectedPlayer());
+      if (!queue) { setStatus("Select an available player first"); return; }
+      const media = item.uri || item.media_item?.uri;
+      if (!media) { setStatus("This item has no playable URI"); return; }
+      await runCommand(() => client.playMedia(queue.queue_id, media));
+    }, "No results");
+    $("more").hidden = !!browsingParent || items.length < 50;
+  } catch (error) { setStatus("Browse failed: " + error.message); }
+}
+$("more").addEventListener("click", async () => { page++; await showBrowse(false); });
+$("panel-back").addEventListener("click", () => {
+  if (browsingParent) { browsingParent = null; showBrowse(); }
+  else switchView("Now Playing");
+});
+document.querySelectorAll("[data-category]").forEach(button => button.addEventListener("click", () => {
+  category = button.dataset.category; showBrowse();
+}));
+function switchView(next) {
+  view = next;
+  $("panel").hidden = next === "Now Playing" || next === "Players";
+  $("browse-tabs").hidden = next !== "Browse";
+  document.querySelectorAll("nav [data-view]").forEach(button =>
+    button.setAttribute("aria-current", button.dataset.view === next ? "page" : "false"));
+  if (next === "Queue") showQueue();
+  else if (next === "Browse") showBrowse();
+  else if (next === "Players") { $("player").focus(); setStatus("Choose a player from the top menu"); }
+}
+document.querySelectorAll("nav button").forEach(button => {
+  button.addEventListener("click", () => switchView(button.dataset.view));
 });
 let reconnectDelay = 1000;
 let reconnectTimer = null;
@@ -86,7 +174,7 @@ client.onReady = async () => {
     authenticated = true;
     await refresh();
     reconnectDelay = 1000;
-    setStatus("Live Music Assistant connection · Read-only Now Playing");
+    setStatus("Connected to Music Assistant");
   } catch (error) {
     setStatus("Unable to load player state: " + error.message);
   }

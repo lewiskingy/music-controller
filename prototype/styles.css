@@ -6,3 +6,12 @@
 .topbar select{max-width:210px;background:#0f172a;color:#fff;border:1px solid #475569;border-radius:6px;padding:5px}
 [hidden]{display:none!important}
 button:disabled,input:disabled{opacity:.45;cursor:not-allowed}
+
+.panel{padding:10px 16px;border-top:1px solid #334155;max-height:280px;overflow:auto}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel-head h2{font-size:16px;margin:5px 0}
+.panel-items{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.item-row{width:100%;text-align:left;min-height:42px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#browse-tabs{display:flex;gap:8px;flex-wrap:wrap}
+#browse-tabs[hidden]{display:none}
+#more{margin-top:10px;width:100%}
