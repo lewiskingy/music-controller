@@ -12,3 +12,8 @@ dist/
 node_modules/
 .DS_Store
 __pycache__/
+
+# Private device provisioning (contains Wi-Fi password and device token)
+firmware/esp32/controller-nvs.bin
+firmware/esp32/*-nvs.bin
+firmware/esp32/config.csv
