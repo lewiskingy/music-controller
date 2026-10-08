@@ -147,3 +147,24 @@ endpoint; rotate and reprovision if it is disclosed.
 - No MA account password or Wi-Fi credentials are committed.
 
 This is a first vertical slice, not yet feature parity with the HTML controller.
+
+## Diagnostic firmware (blank display / stalled gateway)
+
+The diagnostic build logs each stage to serial without printing SSID passwords,
+device tokens or other credentials. A visible dark-blue screen with white
+Music Controller heading, player, track and green status is created before
+Wi-Fi setup. State changes are rendered by the main task, rather than calling
+LVGL directly from Wi-Fi/WebSocket callbacks.
+
+Look for `Diagnostic screen created`, `Wi-Fi starting association`,
+`DHCP address`, `Starting WSS connection`, `WebSocket handshake completed`,
+`Gateway authenticated and ready`, and repeating `Heartbeat` lines.
+If the serial log reports the screen created but the physical panel is still
+blank, treat it as an LCD/LVGL rendering issue independent of networking.
+
+**Flashing:** Download the successful ESP32 firmware Actions artifact for
+this commit. Flash the **merged** `music-controller-full-flash.bin` at `0x0`.
+Because a merged image includes the NVS flash region, **reflash the existing
+private `controller-nvs.bin` at `0x9000` immediately afterwards**. No need
+to regenerate the NVS image or change its credentials. Then restart and
+capture serial output for at least 30 seconds. Never publish the NVS image.
