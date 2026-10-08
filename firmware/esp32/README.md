@@ -65,3 +65,25 @@ skeleton is **expected**.
 **Caution:** Flashing overwrites existing vendor demonstration firmware.
 If preserving the demo matters, back up flash first with esptool or obtain
 the official Waveshare recovery image.
+
+## LCD + touch bring-up milestone
+
+The next build uses the pinned third-party Waveshare 4.3-inch board support
+component `bobscott45/waveshare_esp32_s3_touch_lcd_4_3@1.0.7` and LVGL
+`8.3.11`. It initialises the RGB panel, GT911 touch and backlight, and
+shows a static **Now Playing** placeholder and a touchable button. This is
+a hardware bring-up image, not a connected media controller.
+
+**Before flashing:** confirm the board is the **4.3-inch 800×480 GT911**
+variant (not the separate 4-inch 480×480 product). The previously flashed
+USB serial skeleton remains the recovery baseline. Leave the battery
+disconnected and power from USB.
+
+CI must pass before downloading its merged flash image. After flashing,
+check for `LCD and LVGL initialised` in the serial log. Expected: a dark
+Now Playing screen and a button. Touch should show LVGL's pressed visual
+feedback; no music control commands are sent yet. Report any reset loop,
+white screen, touch offset or display flicker with the serial log.
+
+The component is pinned for repeatable builds. Board pin assignments are
+supplied by the BSP rather than copied into our application.
