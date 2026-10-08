@@ -7,6 +7,7 @@
 #include "esp_event.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
 #include "nvs_flash.h"
@@ -23,6 +24,7 @@ static char player_id[129], player_name[96] = "No player", track[160] = "Waiting
 static lv_obj_t *title_label, *artist_label, *player_label, *state_label;
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
+static volatile bool ip_ready;
 static unsigned request_id;
 
 static void render(void) {
@@ -119,12 +121,11 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *e
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ready = false; status("Wi-Fi reconnecting"); esp_wifi_connect();
+        ready = false; ip_ready = false; status("Wi-Fi reconnecting"); esp_wifi_connect();
     }
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        status("Wi-Fi connected");
-        if (socket_handle && !esp_websocket_client_is_connected(socket_handle))
-            esp_websocket_client_start(socket_handle);
+        ip_ready = true;
+        status("Wi-Fi connected; syncing clock");
     }
 }
 static bool load_config(void) {
@@ -198,10 +199,22 @@ void app_main(void) {
     ws_cfg.headers = headers;
     socket_handle = esp_websocket_client_init(&ws_cfg);
     ESP_ERROR_CHECK(esp_websocket_register_events(socket_handle, WEBSOCKET_EVENT_ANY, ws_event, NULL));
+    esp_sntp_config_t time_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    ESP_ERROR_CHECK(esp_netif_sntp_init(&time_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
+    bool started = false;
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(30000));
+        if (ip_ready && !started) {
+            if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
+                status("Clock synced; connecting...");
+                esp_websocket_client_start(socket_handle);
+                started = true;
+            } else {
+                status("Waiting for network time...");
+            }
+        }
         if (ready) refresh();
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
