@@ -10,6 +10,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
