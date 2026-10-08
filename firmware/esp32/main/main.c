@@ -60,7 +60,6 @@ static volatile bool ws_connected;
 #define WS_MAX_MESSAGE (128 * 1024)
 static char *ws_buffer;
 static size_t ws_expected, ws_received;
-static unsigned long heartbeat_counter;
 static void reset_ws_message(void) {
     free(ws_buffer);
     ws_buffer = NULL;
@@ -97,6 +96,87 @@ static void request(const char *command, char type) {
     int sent = esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
     if (sent < 0) ESP_LOGE(TAG, "Failed to send MA request %c", type);
 }
+
+static void command_with_args(const char *command, const char *id, int volume, bool with_volume) {
+    if (!ready || !esp_websocket_client_is_connected(socket_handle) || !id[0]) return;
+    cJSON *message = cJSON_CreateObject();
+    cJSON *args = cJSON_CreateObject();
+    if (!message || !args) { cJSON_Delete(message); cJSON_Delete(args); return; }
+    char message_id[24];
+    snprintf(message_id, sizeof(message_id), "c%u", ++request_id);
+    cJSON_AddStringToObject(message, "message_id", message_id);
+    cJSON_AddStringToObject(message, "command", command);
+    cJSON_AddStringToObject(args, "player_id", id);
+    if (with_volume) cJSON_AddNumberToObject(args, "volume_level", volume);
+    cJSON_AddItemToObject(message, "args", args);
+    char *payload = cJSON_PrintUnformatted(message);
+    if (payload) {
+        ESP_LOGI(TAG, "Sending player command: %s", command);
+        esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+        free(payload);
+    }
+    cJSON_Delete(message);
+}
+static void save_preferred_player(const char *id) {
+    nvs_handle_t n;
+    if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) {
+        status("Unable to save player");
+        return;
+    }
+    esp_err_t err = nvs_set_str(n, "player_id", id);
+    if (err == ESP_OK) err = nvs_commit(n);
+    nvs_close(n);
+    if (err != ESP_OK) status("Unable to save player");
+    else ESP_LOGI(TAG, "Player selection saved to NVS");
+}
+static void process_action(const action_t *action) {
+    if (action->type == ACT_SELECT) {
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+        bool found = false;
+        for (size_t i = 0; i < player_count; ++i)
+            if (!strcmp(players[i].id, action->player_id)) found = true;
+        if (found) {
+            snprintf(preferred, sizeof(preferred), "%s", action->player_id);
+            snprintf(player_id, sizeof(player_id), "%s", action->player_id);
+            snprintf(track, sizeof(track), "Loading player...");
+            artist[0] = 0;
+            players_dirty = true;
+            screen_dirty = true;
+        }
+        xSemaphoreGive(state_mutex);
+        if (found) { save_preferred_player(action->player_id); refresh_pending = true; }
+        return;
+    }
+    if (!ready || !current_available || !player_id[0]) {
+        status("Player unavailable");
+        return;
+    }
+    const char *command = NULL;
+    int volume = current_volume;
+    bool volume_command = false;
+    switch (action->type) {
+        case ACT_PLAY_PAUSE:
+            if (current_playing && current_sonos) {
+                status("Use Stop on Sonos");
+                return;
+            }
+            command = current_playing ? "players/cmd/pause" : "players/cmd/play";
+            break;
+        case ACT_STOP: command = "players/cmd/stop"; break;
+        case ACT_PREVIOUS: command = "players/cmd/previous"; break;
+        case ACT_NEXT: command = "players/cmd/next"; break;
+        case ACT_VOLUME_DOWN:
+            volume = volume > 10 ? volume - 10 : 0;
+            command = "players/cmd/volume_set"; volume_command = true; break;
+        case ACT_VOLUME_UP:
+            volume = volume < 90 ? volume + 10 : 100;
+            command = "players/cmd/volume_set"; volume_command = true; break;
+        default: return;
+    }
+    command_with_args(command, player_id, volume, volume_command);
+    refresh_pending = true;
+}
+
 static void refresh(void) {
     request("players/all", 'p');
     request("player_queues/all", 'q');
@@ -468,6 +548,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
     bool started = false;
+    int64_t last_refresh = 0;
     while (true) {
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
@@ -479,8 +560,15 @@ void app_main(void) {
                 status("Waiting for network time...");
             }
         }
-        if (screen_dirty) { render(); screen_dirty = false; }
-        if (ready && (refresh_pending || (++heartbeat_counter % 6 == 0))) { refresh_pending = false; refresh(); }
+        action_t action;
+        while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
+        if (screen_dirty || players_dirty) { render(); screen_dirty = false; }
+        int64_t now = esp_timer_get_time();
+        if (ready && (refresh_pending || now - last_refresh >= 30000000LL)) {
+            refresh_pending = false;
+            last_refresh = now;
+            refresh();
+        }
         ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d screen=%d", (int)ip_ready, (int)ws_connected, (int)ready, (int)(title_label != NULL));
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
