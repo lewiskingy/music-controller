@@ -168,3 +168,17 @@ Because a merged image includes the NVS flash region, **reflash the existing
 private `controller-nvs.bin` at `0x9000` immediately afterwards**. No need
 to regenerate the NVS image or change its credentials. Then restart and
 capture serial output for at least 30 seconds. Never publish the NVS image.
+
+## WebSocket response reassembly fix
+
+The first connected hardware test established Wi-Fi, TLS, WebSocket and
+`gateway/ready`, but large `players/all` and `player_queues/all` replies
+were silently dropped. This revision assembles fragmented WebSocket text
+messages in bounded PSRAM (128 KiB maximum), logs fragment lengths and
+completed response counts, reports API errors and refreshes periodically.
+Messages larger than the bound are rejected rather than risking memory use.
+
+After CI succeeds, flash the new **merged** firmware image at `0x0`, then
+reflash your **existing private** `controller-nvs.bin` at `0x9000`.
+No configuration changes are required. Observe `MA request p`, `WS frame`,
+`WS message assembled` and `MA response p/q` in the serial monitor.

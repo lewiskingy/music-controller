@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
 #include "nvs_flash.h"
@@ -30,6 +31,15 @@ static const char *TAG = "controller";
 static volatile bool screen_dirty = true;
 static volatile bool refresh_pending;
 static volatile bool ws_connected;
+#define WS_MAX_MESSAGE (128 * 1024)
+static char *ws_buffer;
+static size_t ws_expected, ws_received;
+static unsigned long heartbeat_counter;
+static void reset_ws_message(void) {
+    free(ws_buffer);
+    ws_buffer = NULL;
+    ws_expected = ws_received = 0;
+}
 
 static void render(void) {
     if (!title_label || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
@@ -50,7 +60,9 @@ static void request(const char *command, char type) {
     snprintf(payload, sizeof(payload),
              "{\"message_id\":\"%c%u\",\"command\":\"%s\",\"args\":{}}",
              type, ++request_id, command);
-    esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+    ESP_LOGI(TAG, "MA request %c: %s", type, command);
+    int sent = esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+    if (sent < 0) ESP_LOGE(TAG, "Failed to send MA request %c", type);
 }
 static void refresh(void) {
     request("players/all", 'p');
@@ -92,43 +104,83 @@ static void queues_received(const cJSON *array) {
         return;
     }
 }
+static void handle_message(const char *payload, size_t len) {
+    cJSON *msg = cJSON_ParseWithLength(payload, len);
+    if (!msg) { ESP_LOGW(TAG, "Invalid JSON response (%u bytes)", (unsigned)len); return; }
+    const cJSON *event = cJSON_GetObjectItemCaseSensitive(msg, "event");
+    if (cJSON_IsString(event)) {
+        ESP_LOGI(TAG, "Gateway event: %s", event->valuestring);
+        if (!strcmp(event->valuestring, "gateway/ready")) {
+            ready = true; status("Connected"); refresh_pending = true;
+        } else if (!strcmp(event->valuestring, "gateway/error")) {
+            ready = false; status("Gateway authentication failed");
+        } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
+            refresh_pending = true;
+        }
+    }
+    const cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "message_id");
+    const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
+    if (cJSON_IsString(mid)) {
+        if (error && !cJSON_IsNull(error) && !cJSON_IsFalse(error)) {
+            ESP_LOGE(TAG, "MA response %c returned error", mid->valuestring[0]);
+            status("Music Assistant API error");
+        } else if (cJSON_IsArray(result)) {
+            ESP_LOGI(TAG, "MA response %c: %d items", mid->valuestring[0], cJSON_GetArraySize(result));
+            if (mid->valuestring[0] == 'p') players_received(result);
+            else if (mid->valuestring[0] == 'q') queues_received(result);
+        } else ESP_LOGW(TAG, "MA response %c: unexpected shape", mid->valuestring[0]);
+    }
+    cJSON_Delete(msg);
+}
 static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *ev = event_data;
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
-        ws_connected = false;
+        reset_ws_message();
+        ws_connected = false; ready = false;
+        status("Gateway reconnecting...");
         ESP_LOGW(TAG, "WebSocket disconnected");
-        ready = false; status("Gateway reconnecting...");
     } else if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        reset_ws_message();
         ws_connected = true;
         ESP_LOGI(TAG, "WebSocket handshake completed");
         status("Authenticating...");
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
+        reset_ws_message();
         ESP_LOGE(TAG, "WebSocket error; inspect transport_ws status");
         status("WebSocket error");
-    } else if (event_id == WEBSOCKET_EVENT_DATA && ev->op_code == 1 &&
-               ev->payload_offset == 0 && ev->data_len == ev->payload_len &&
-               ev->data_len > 0 && ev->data_len < 16384) {
-        cJSON *msg = cJSON_ParseWithLength(ev->data_ptr, ev->data_len);
-        if (!msg) return;
-        const cJSON *event = cJSON_GetObjectItemCaseSensitive(msg, "event");
-        if (cJSON_IsString(event)) {
-            if (!strcmp(event->valuestring, "gateway/ready")) {
-                ESP_LOGI(TAG, "Gateway authenticated and ready");
-                ready = true; status("Connected"); refresh_pending = true;
-            } else if (!strcmp(event->valuestring, "gateway/error")) {
-                ready = false; status("Gateway authentication failed");
-            } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
-                refresh_pending = true;
+    } else if (event_id == WEBSOCKET_EVENT_DATA && ev) {
+        ESP_LOGI(TAG, "WS frame: opcode=%d offset=%d length=%d total=%d",
+                 ev->op_code, ev->payload_offset, ev->data_len, ev->payload_len);
+        if (ev->payload_offset == 0) {
+            reset_ws_message();
+            if (ev->op_code != 1 || ev->payload_len <= 0 || ev->payload_len > WS_MAX_MESSAGE) {
+                ESP_LOGW(TAG, "Dropping unsupported or oversized WS message");
+                return;
+            }
+            ws_expected = ev->payload_len;
+            ws_buffer = heap_caps_malloc(ws_expected + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!ws_buffer) {
+                ESP_LOGE(TAG, "PSRAM allocation failed for WS response");
+                reset_ws_message();
+                return;
             }
         }
-        const cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "message_id");
-        const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
-        if (cJSON_IsString(mid) && cJSON_IsArray(result)) {
-            ESP_LOGI(TAG, "MA response %c: %d items", mid->valuestring[0], cJSON_GetArraySize(result));
-            if (mid->valuestring[0] == 'p') players_received(result);
-            if (mid->valuestring[0] == 'q') queues_received(result);
+        if (!ws_buffer || ev->data_len < 0 || ev->payload_offset < 0 ||
+            (size_t)ev->payload_offset != ws_received ||
+            (size_t)ev->data_len > ws_expected - ws_received) {
+            ESP_LOGW(TAG, "Invalid or out-of-order WS fragment; discarding message");
+            reset_ws_message();
+            return;
         }
-        cJSON_Delete(msg);
+        memcpy(ws_buffer + ws_received, ev->data_ptr, ev->data_len);
+        ws_received += ev->data_len;
+        if (ws_received == ws_expected) {
+            ws_buffer[ws_received] = 0;
+            ESP_LOGI(TAG, "WS message assembled: %u bytes", (unsigned)ws_received);
+            handle_message(ws_buffer, ws_received);
+            reset_ws_message();
+        }
     }
 }
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -248,7 +300,7 @@ void app_main(void) {
             }
         }
         if (screen_dirty) { render(); screen_dirty = false; }
-        if (ready && (refresh_pending || (request_id % 12 == 0))) { refresh_pending = false; refresh(); }
+        if (ready && (refresh_pending || (++heartbeat_counter % 6 == 0))) { refresh_pending = false; refresh(); }
         ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d screen=%d", (int)ip_ready, (int)ws_connected, (int)ready, (int)(title_label != NULL));
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
