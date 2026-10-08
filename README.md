@@ -54,7 +54,7 @@ Open `http://localhost:8080` to inspect layout; live data requires Atlas Caddy r
 
 1. Validate transport, queue and browse commands against the installed Music Assistant version; complete Search and artwork handling.
 2. Verify the strict 800×480 single-screen UX on mobile and Waveshare-sized display.
-3. Waveshare hardware bring-up and native LVGL UI.
+3. ESP32-S3 firmware foundation and CI (see [firmware/esp32](firmware/esp32/README.md)); then Waveshare board-specific display/touch BSP and native LVGL UI.
 4. Power management, dock, enclosure and Atlas-managed signed OTA/rollback.
 
 Originating initiative: [Atlas #577](https://github.com/lewiskingy/atlas/issues/577).
