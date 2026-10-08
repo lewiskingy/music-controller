@@ -1,6 +1,6 @@
 # ESP32-S3 firmware foundation
 
-**Status:** hardware-neutral boot skeleton. It logs startup over USB serial; it does **not** yet initialise LCD, touch, Wi-Fi, Music Assistant or OTA.
+**Status:** LCD/touch bring-up is proven on hardware. This branch adds a first **read-only connected Now Playing** firmware: Wi-Fi, TLS WebSocket to the Atlas device gateway, player/queue state and LVGL text. It does not yet implement artwork, queue browsing, transport buttons or OTA.
 
 ## Build
 
@@ -87,3 +87,63 @@ white screen, touch offset or display flicker with the serial log.
 
 The component is pinned for repeatable builds. Board pin assignments are
 supplied by the BSP rather than copied into our application.
+
+## Connected Now Playing — private configuration
+
+**Do not use the Music Assistant `media` password on the device.**
+Atlas holds MA account credentials; the ESP32 receives a separate device token.
+Neither Wi-Fi credentials nor device token are built into public firmware or
+GitHub Actions artifacts.
+
+1. Deploy the companion Atlas native-device gateway PR. On Atlas generate a
+   random token using `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+   and append `CONTROLLER_DEVICE_TOKEN=<token>` to the existing private
+   `/opt/atlas-secrets/music-controller.env`. Retain the `docker-secrets`
+   ownership/permissions and run normal Atlas deployment.
+2. On the Windows flashing computer, obtain ESP-IDF v5.4.2's NVS generator.
+   You can clone its source without installing the whole build toolchain:
+   `git clone --depth 1 --branch v5.4.2 https://github.com/espressif/esp-idf.git esp-idf-5.4.2`.
+   In PowerShell set `$env:IDF_PATH=(Resolve-Path .\\esp-idf-5.4.2).Path`.
+   Run `py firmware/esp32/provision.py` from the music-controller checkout.
+   Enter the Wi-Fi SSID/password, Atlas device token, and optionally the
+   Music Assistant player ID. The default URL is
+   `wss://music.theflat.me.uk/controller/device/ws`.
+   The generator may require the ESP-IDF Python NVS dependencies.
+3. The generator writes **private** `firmware/esp32/controller-nvs.bin`
+   (24 KiB). Never upload it or commit it.
+4. Flash the **full merged firmware image** at address `0x0` as before.
+   Then flash the private NVS partition at address `0x9000`:
+
+   ```powershell
+   py -m esptool --chip esp32s3 --port COM4 write-flash 0x0 music-controller-full-flash.bin
+   py -m esptool --chip esp32s3 --port COM4 write-flash 0x9000 firmware/esp32/controller-nvs.bin
+   py -m serial.tools.miniterm COM4 115200
+   ```
+
+   Adjust paths and COM port to your actual directories. **Never** flash
+   `music_controller.bin` at `0x0`; it is only the application partition.
+5. With LAN split DNS configured, the device should show Wi-Fi connection,
+   gateway authentication, selected player and current track/artist. A
+   disconnected device retries Wi-Fi and WebSocket automatically.
+
+The first build defaults to the first available Music Assistant player. For a
+specific Sonos or Cast output, provide its exact MA `player_id` during NVS
+provisioning. The device validates Atlas's HTTPS certificate; do not disable
+certificate verification as a workaround for local DNS problems.
+
+**Important:** A full merged image can overwrite the NVS region. Provision
+after each full-flash operation. Future OTA application-only updates should
+preserve the NVS partition. The device token is shared by this initial device
+endpoint; rotate and reprovision if it is disclosed.
+
+### Acceptance before adding touch controls
+
+- Boots without resets on the actual 4.3-inch 800×480 hardware.
+- Wi-Fi and certificate-verified WSS connection work.
+- Gateway rejects missing/wrong device tokens.
+- Real selected player and Now Playing metadata appear.
+- Changing playback from Music Assistant/Symfonium updates the display.
+- Restarting Atlas or Wi-Fi recovers without reflashing.
+- No MA account password or Wi-Fi credentials are committed.
+
+This is a first vertical slice, not yet feature parity with the HTML controller.
