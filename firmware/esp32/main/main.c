@@ -282,37 +282,145 @@ static bool load_config(void) {
     nvs_close(n);
     return ssid[0] && token[0] && !strncmp(url,"wss://",6);
 }
-static void init_screen(void) {
-    lv_obj_t *root = lv_scr_act();
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x121c30), 0);
-    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
-    lv_obj_t *heading = lv_label_create(root);
-    lv_label_set_text(heading, "Music Controller");
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
-    lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 24);
-    lv_obj_set_style_text_color(heading, lv_color_white(), 0);
-    player_label = lv_label_create(root);
-    lv_obj_align(player_label, LV_ALIGN_TOP_MID, 0, 85);
-    lv_obj_set_style_text_color(player_label, lv_color_white(), 0);
-    title_label = lv_label_create(root);
-    lv_obj_set_width(title_label, 730);
-    lv_label_set_long_mode(title_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(title_label, LV_ALIGN_CENTER, 0, -25);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
-    artist_label = lv_label_create(root);
-    lv_obj_set_width(artist_label, 700);
-    lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(artist_label, LV_ALIGN_CENTER, 0, 28);
-    lv_obj_set_style_text_color(artist_label, lv_color_white(), 0);
-    state_label = lv_label_create(root);
-    lv_obj_align(state_label, LV_ALIGN_BOTTOM_MID, 0, -26);
-    lv_obj_set_style_text_color(state_label, lv_color_hex(0x8fe3a0), 0);
+static void enqueue(action_type_t type, const char *id) {
+    if (!action_queue) return;
+    action_t action = {.type = type};
+    if (id) snprintf(action.player_id, sizeof(action.player_id), "%s", id);
+    if (xQueueSend(action_queue, &action, 0) != pdTRUE) ESP_LOGW(TAG, "Action queue full");
+}
+static void control_clicked(lv_event_t *event) {
+    action_type_t type = (action_type_t)(intptr_t)lv_event_get_user_data(event);
+    enqueue(type, NULL);
+}
+static void player_clicked(lv_event_t *event) {
+    const char *id = lv_event_get_user_data(event);
+    if (!id) return;
+    enqueue(ACT_SELECT, id);
+    active_view = VIEW_NOW_PLAYING;
+    lv_scr_load(now_screen);
+}
+static void open_players(lv_event_t *event) {
+    active_view = VIEW_PLAYERS;
+    lv_scr_load(players_screen);
+}
+static void back_clicked(lv_event_t *event) {
+    active_view = VIEW_NOW_PLAYING;
+    lv_scr_load(now_screen);
+}
+static lv_obj_t *make_button(lv_obj_t *parent, const char *label,
+                             lv_coord_t x, lv_coord_t y, lv_coord_t w,
+                             action_type_t action) {
+    lv_obj_t *button = lv_btn_create(parent);
+    lv_obj_set_size(button, w, 60);
+    lv_obj_align(button, LV_ALIGN_TOP_LEFT, x, y);
+    lv_obj_add_event_cb(button, control_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)action);
+    lv_obj_t *text = lv_label_create(button);
+    lv_label_set_text(text, label);
+    lv_obj_center(text);
+    return button;
+}
+static void update_now_playing(void) {
     lv_label_set_text(title_label, track);
     lv_label_set_text(artist_label, artist);
     lv_label_set_text(player_label, player_name);
     lv_label_set_text(state_label, state);
+    char volume_text[40];
+    snprintf(volume_text, sizeof(volume_text), "Volume %d%%", current_volume);
+    lv_label_set_text(volume_label, volume_text);
+    lv_label_set_text(play_text, current_playing ? "Pause" : "Play");
+    // Sonos pause currently has a known queue-hopping issue. Use Stop instead.
+    if (!ready || !current_available || (current_sonos && current_playing))
+        lv_obj_add_state(play_button, LV_STATE_DISABLED);
+    else lv_obj_clear_state(play_button, LV_STATE_DISABLED);
+}
+static void build_players_view(void) {
+    if (!players_list) return;
+    lv_obj_clean(players_list);
+    if (!player_count) {
+        lv_obj_t *label = lv_label_create(players_list);
+        lv_label_set_text(label, "No players available");
+        return;
+    }
+    for (size_t i = 0; i < player_count; ++i) {
+        lv_obj_t *button = lv_list_add_btn(players_list, NULL, players[i].name);
+        lv_obj_set_height(button, 56);
+        if (!strcmp(players[i].id, player_id))
+            lv_obj_set_style_bg_color(button, lv_color_hex(0x315f91), 0);
+        lv_obj_add_event_cb(button, player_clicked, LV_EVENT_CLICKED, players[i].id);
+    }
+}
+static void init_screen(void) {
+    now_screen = lv_scr_act();
+    lv_obj_set_style_bg_color(now_screen, lv_color_hex(0x121c30), 0);
+    lv_obj_set_style_bg_opa(now_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(now_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *heading = lv_label_create(now_screen);
+    lv_label_set_text(heading, "NOW PLAYING");
+    lv_obj_set_style_text_color(heading, lv_color_hex(0xa8c3e3), 0);
+    lv_obj_align(heading, LV_ALIGN_TOP_LEFT, 22, 16);
+
+    lv_obj_t *player_button = lv_btn_create(now_screen);
+    lv_obj_set_size(player_button, 260, 58);
+    lv_obj_align(player_button, LV_ALIGN_TOP_RIGHT, -18, 8);
+    lv_obj_add_event_cb(player_button, open_players, LV_EVENT_CLICKED, NULL);
+    player_label = lv_label_create(player_button);
+    lv_label_set_text(player_label, player_name);
+    lv_label_set_long_mode(player_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(player_label, 225);
+    lv_obj_center(player_label);
+
+    title_label = lv_label_create(now_screen);
+    lv_obj_set_width(title_label, 750);
+    lv_label_set_long_mode(title_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 105);
+
+    artist_label = lv_label_create(now_screen);
+    lv_obj_set_width(artist_label, 740);
+    lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(artist_label, lv_color_hex(0xc0d1e8), 0);
+    lv_obj_align(artist_label, LV_ALIGN_TOP_MID, 0, 155);
+
+    make_button(now_screen, "Prev", 116, 222, 125, ACT_PREVIOUS);
+    play_button = make_button(now_screen, "Play", 250, 222, 125, ACT_PLAY_PAUSE);
+    play_text = lv_obj_get_child(play_button, 0);
+    make_button(now_screen, "Next", 384, 222, 125, ACT_NEXT);
+    make_button(now_screen, "Stop", 518, 222, 125, ACT_STOP);
+
+    make_button(now_screen, "-", 205, 313, 90, ACT_VOLUME_DOWN);
+    volume_label = lv_label_create(now_screen);
+    lv_obj_set_width(volume_label, 190);
+    lv_obj_set_style_text_align(volume_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(volume_label, LV_ALIGN_TOP_MID, 0, 330);
+    make_button(now_screen, "+", 505, 313, 90, ACT_VOLUME_UP);
+
+    state_label = lv_label_create(now_screen);
+    lv_obj_set_style_text_color(state_label, lv_color_hex(0x8fe3a0), 0);
+    lv_obj_align(state_label, LV_ALIGN_BOTTOM_MID, 0, -20);
+
+    players_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(players_screen, lv_color_hex(0x121c30), 0);
+    lv_obj_set_style_bg_opa(players_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(players_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *players_title = lv_label_create(players_screen);
+    lv_label_set_text(players_title, "SELECT PLAYER");
+    lv_obj_set_style_text_color(players_title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(players_title, &lv_font_montserrat_24, 0);
+    lv_obj_align(players_title, LV_ALIGN_TOP_LEFT, 20, 24);
+    lv_obj_t *back = lv_btn_create(players_screen);
+    lv_obj_set_size(back, 190, 58);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, -18, 10);
+    lv_obj_add_event_cb(back, back_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_text = lv_label_create(back);
+    lv_label_set_text(back_text, "Back");
+    lv_obj_center(back_text);
+    players_list = lv_list_create(players_screen);
+    lv_obj_set_size(players_list, 760, 365);
+    lv_obj_align(players_list, LV_ALIGN_BOTTOM_MID, 0, -10);
+    update_now_playing();
 }
 void app_main(void) {
     esp_lcd_panel_handle_t panel = NULL;
@@ -327,6 +435,9 @@ void app_main(void) {
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
+    state_mutex = xSemaphoreCreateMutex();
+    action_queue = xQueueCreate(12, sizeof(action_t));
+    ESP_ERROR_CHECK(state_mutex && action_queue ? ESP_OK : ESP_ERR_NO_MEM);
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); return; }
