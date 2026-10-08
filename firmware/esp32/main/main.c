@@ -26,6 +26,10 @@ static esp_websocket_client_handle_t socket_handle;
 static bool ready;
 static volatile bool ip_ready;
 static unsigned request_id;
+static const char *TAG = "controller";
+static volatile bool screen_dirty = true;
+static volatile bool refresh_pending;
+static volatile bool ws_connected;
 
 static void render(void) {
     if (!title_label || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
@@ -35,7 +39,7 @@ static void render(void) {
     lv_label_set_text(state_label, state);
     lvgl_port_unlock();
 }
-static void status(const char *s) { snprintf(state, sizeof(state), "%s", s); render(); }
+static void status(const char *s) { snprintf(state, sizeof(state), "%s", s); ESP_LOGI(TAG, "STATE: %s", state); screen_dirty = true; }
 static void field(char *out, size_t cap, const cJSON *obj, const char *key) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(v)) snprintf(out, cap, "%s", v->valuestring);
@@ -64,8 +68,8 @@ static void players_received(const cJSON *array) {
     if (!chosen) { status("No players found"); return; }
     field(player_id, sizeof(player_id), chosen, "player_id");
     field(player_name, sizeof(player_name), chosen, "name");
-    render();
-    request("player_queues/all", 'q');
+    screen_dirty = true;
+    refresh_pending = true;
 }
 static void queues_received(const cJSON *array) {
     if (!cJSON_IsArray(array)) return;
@@ -84,16 +88,23 @@ static void queues_received(const cJSON *array) {
             const cJSON *first = cJSON_GetArrayItem(artists, 0);
             if (first) field(artist, sizeof(artist), first, "name");
         }
-        render();
+        screen_dirty = true;
         return;
     }
 }
 static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *ev = event_data;
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
+        ws_connected = false;
+        ESP_LOGW(TAG, "WebSocket disconnected");
         ready = false; status("Gateway reconnecting...");
     } else if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        ws_connected = true;
+        ESP_LOGI(TAG, "WebSocket handshake completed");
         status("Authenticating...");
+    } else if (event_id == WEBSOCKET_EVENT_ERROR) {
+        ESP_LOGE(TAG, "WebSocket error; inspect transport_ws status");
+        status("WebSocket error");
     } else if (event_id == WEBSOCKET_EVENT_DATA && ev->op_code == 1 &&
                ev->payload_offset == 0 && ev->data_len == ev->payload_len &&
                ev->data_len > 0 && ev->data_len < 16384) {
@@ -102,16 +113,18 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *e
         const cJSON *event = cJSON_GetObjectItemCaseSensitive(msg, "event");
         if (cJSON_IsString(event)) {
             if (!strcmp(event->valuestring, "gateway/ready")) {
-                ready = true; status("Connected"); refresh();
+                ESP_LOGI(TAG, "Gateway authenticated and ready");
+                ready = true; status("Connected"); refresh_pending = true;
             } else if (!strcmp(event->valuestring, "gateway/error")) {
                 ready = false; status("Gateway authentication failed");
             } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
-                refresh();
+                refresh_pending = true;
             }
         }
         const cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "message_id");
         const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
         if (cJSON_IsString(mid) && cJSON_IsArray(result)) {
+            ESP_LOGI(TAG, "MA response %c: %d items", mid->valuestring[0], cJSON_GetArraySize(result));
             if (mid->valuestring[0] == 'p') players_received(result);
             if (mid->valuestring[0] == 'q') queues_received(result);
         }
@@ -119,11 +132,18 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *e
     }
 }
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "Wi-Fi starting association");
+        esp_wifi_connect();
+    }
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *info = data;
+        ESP_LOGW(TAG, "Wi-Fi disconnect reason=%d", info ? info->reason : -1);
         ready = false; ip_ready = false; status("Wi-Fi reconnecting"); esp_wifi_connect();
     }
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *ip = data;
+        ESP_LOGI(TAG, "DHCP address " IPSTR, IP2STR(&ip->ip_info.ip));
         ip_ready = true;
         status("Wi-Fi connected; syncing clock");
     }
@@ -144,24 +164,30 @@ static bool load_config(void) {
 static void init_screen(void) {
     lv_obj_t *root = lv_scr_act();
     lv_obj_set_style_bg_color(root, lv_color_hex(0x121c30), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *heading = lv_label_create(root);
     lv_label_set_text(heading, "Music Controller");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
     lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_set_style_text_color(heading, lv_color_white(), 0);
     player_label = lv_label_create(root);
     lv_obj_align(player_label, LV_ALIGN_TOP_MID, 0, 85);
+    lv_obj_set_style_text_color(player_label, lv_color_white(), 0);
     title_label = lv_label_create(root);
     lv_obj_set_width(title_label, 730);
     lv_label_set_long_mode(title_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(title_label, LV_ALIGN_CENTER, 0, -25);
+    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     artist_label = lv_label_create(root);
     lv_obj_set_width(artist_label, 700);
     lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(artist_label, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_set_style_text_color(artist_label, lv_color_white(), 0);
     state_label = lv_label_create(root);
     lv_obj_align(state_label, LV_ALIGN_BOTTOM_MID, 0, -26);
+    lv_obj_set_style_text_color(state_label, lv_color_hex(0x8fe3a0), 0);
     lv_label_set_text(title_label, track);
     lv_label_set_text(artist_label, artist);
     lv_label_set_text(player_label, player_name);
@@ -173,7 +199,13 @@ void app_main(void) {
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
-    if (lvgl_port_lock(-1)) { init_screen(); lvgl_port_unlock(); }
+    ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
+    if (lvgl_port_lock(pdMS_TO_TICKS(2000))) {
+        init_screen();
+        lv_obj_invalidate(lv_scr_act());
+        lvgl_port_unlock();
+        ESP_LOGI(TAG, "Diagnostic screen created");
+    } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); return; }
@@ -208,13 +240,16 @@ void app_main(void) {
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
                 status("Clock synced; connecting...");
+                ESP_LOGI(TAG, "Starting WSS connection");
                 esp_websocket_client_start(socket_handle);
                 started = true;
             } else {
                 status("Waiting for network time...");
             }
         }
-        if (ready) refresh();
+        if (screen_dirty) { render(); screen_dirty = false; }
+        if (ready && (refresh_pending || (request_id % 12 == 0))) { refresh_pending = false; refresh(); }
+        ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d screen=%d", (int)ip_ready, (int)ws_connected, (int)ready, (int)(title_label != NULL));
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
