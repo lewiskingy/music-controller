@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include "esp_wifi.h"
@@ -22,7 +24,31 @@
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
-static lv_obj_t *title_label, *artist_label, *player_label, *state_label;
+#define MAX_PLAYERS 20
+typedef struct {
+    char id[129];
+    char name[96];
+    char provider[64];
+    int volume;
+    bool playing;
+    bool paused;
+    bool available;
+} player_info_t;
+static player_info_t players[MAX_PLAYERS];
+static size_t player_count;
+static SemaphoreHandle_t state_mutex;
+static QueueHandle_t action_queue;
+typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS } view_t;
+typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP } action_type_t;
+typedef struct { action_type_t type; char player_id[129]; } action_t;
+static view_t active_view = VIEW_NOW_PLAYING;
+static lv_obj_t *now_screen, *players_screen;
+static lv_obj_t *title_label, *artist_label, *player_label, *state_label, *volume_label, *play_button, *play_text;
+static lv_obj_t *players_list;
+static volatile bool players_dirty = true;
+static int current_volume = 0;
+static bool current_playing, current_paused, current_available;
+static bool current_sonos;
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
 static volatile bool ip_ready;
@@ -41,15 +67,22 @@ static void reset_ws_message(void) {
     ws_expected = ws_received = 0;
 }
 
+static void build_players_view(void);
+static void update_now_playing(void);
 static void render(void) {
-    if (!title_label || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
-    lv_label_set_text(title_label, track);
-    lv_label_set_text(artist_label, artist);
-    lv_label_set_text(player_label, player_name);
-    lv_label_set_text(state_label, state);
+    if (!now_screen || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
+    if (state_mutex && xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        update_now_playing();
+        if (players_dirty) { build_players_view(); players_dirty = false; }
+        xSemaphoreGive(state_mutex);
+    }
     lvgl_port_unlock();
 }
-static void status(const char *s) { snprintf(state, sizeof(state), "%s", s); ESP_LOGI(TAG, "STATE: %s", state); screen_dirty = true; }
+static void status(const char *s) {
+    snprintf(state, sizeof(state), "%s", s);
+    ESP_LOGI(TAG, "STATE: %s", state);
+    screen_dirty = true;
+}
 static void field(char *out, size_t cap, const cJSON *obj, const char *key) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (cJSON_IsString(v)) snprintf(out, cap, "%s", v->valuestring);
@@ -69,22 +102,56 @@ static void refresh(void) {
     request("player_queues/all", 'q');
 }
 static void players_received(const cJSON *array) {
-    if (!cJSON_IsArray(array)) return;
-    const cJSON *chosen = NULL, *p;
+    if (!cJSON_IsArray(array) || !state_mutex) return;
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    player_count = 0;
+    const cJSON *p;
     cJSON_ArrayForEach(p, array) {
+        if (player_count >= MAX_PLAYERS) break;
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(p, "player_id");
-        if (!cJSON_IsString(id)) continue;
-        if (!chosen) chosen = p;
-        if (preferred[0] && !strcmp(preferred, id->valuestring)) { chosen = p; break; }
+        if (!cJSON_IsString(id) || !id->valuestring[0]) continue;
+        player_info_t *info = &players[player_count++];
+        memset(info, 0, sizeof(*info));
+        field(info->id, sizeof(info->id), p, "player_id");
+        field(info->name, sizeof(info->name), p, "name");
+        field(info->provider, sizeof(info->provider), p, "provider");
+        const cJSON *volume = cJSON_GetObjectItemCaseSensitive(p, "volume_level");
+        info->volume = cJSON_IsNumber(volume) ? volume->valueint : 0;
+        const cJSON *play_state = cJSON_GetObjectItemCaseSensitive(p, "state");
+        info->playing = cJSON_IsString(play_state) && strcmp(play_state->valuestring, "playing") == 0;
+        info->paused = cJSON_IsString(play_state) && strcmp(play_state->valuestring, "paused") == 0;
+        const cJSON *available = cJSON_GetObjectItemCaseSensitive(p, "available");
+        info->available = !cJSON_IsFalse(available);
     }
-    if (!chosen) { status("No players found"); return; }
-    field(player_id, sizeof(player_id), chosen, "player_id");
-    field(player_name, sizeof(player_name), chosen, "name");
+    const player_info_t *chosen = NULL;
+    for (size_t i = 0; i < player_count; ++i) {
+        if (!strcmp(players[i].id, preferred)) { chosen = &players[i]; break; }
+    }
+    if (!chosen && player_count) chosen = &players[0];
+    if (chosen) {
+        bool changed = strcmp(player_id, chosen->id) != 0;
+        snprintf(player_id, sizeof(player_id), "%s", chosen->id);
+        snprintf(player_name, sizeof(player_name), "%s", chosen->name);
+        current_volume = chosen->volume;
+        current_playing = chosen->playing;
+        current_paused = chosen->paused;
+        current_available = chosen->available;
+        current_sonos = strstr(chosen->provider, "sonos") != NULL ||
+                        strstr(chosen->provider, "SONOS") != NULL;
+        if (changed) { snprintf(track, sizeof(track), "Loading player..."); artist[0] = 0; }
+    } else {
+        player_id[0] = 0;
+        snprintf(player_name, sizeof(player_name), "No players");
+        current_available = false;
+    }
+    players_dirty = true;
     screen_dirty = true;
+    xSemaphoreGive(state_mutex);
     refresh_pending = true;
 }
 static void queues_received(const cJSON *array) {
-    if (!cJSON_IsArray(array)) return;
+    if (!cJSON_IsArray(array) || !state_mutex) return;
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
     const cJSON *queue;
     cJSON_ArrayForEach(queue, array) {
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(queue, "queue_id");
@@ -101,8 +168,10 @@ static void queues_received(const cJSON *array) {
             if (first) field(artist, sizeof(artist), first, "name");
         }
         screen_dirty = true;
+        xSemaphoreGive(state_mutex);
         return;
     }
+    xSemaphoreGive(state_mutex);
 }
 static void handle_message(const char *payload, size_t len) {
     cJSON *msg = cJSON_ParseWithLength(payload, len);
