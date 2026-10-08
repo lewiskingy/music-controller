@@ -182,3 +182,45 @@ After CI succeeds, flash the new **merged** firmware image at `0x0`, then
 reflash your **existing private** `controller-nvs.bin` at `0x9000`.
 No configuration changes are required. Observe `MA request p`, `WS frame`,
 `WS message assembled` and `MA response p/q` in the serial monitor.
+
+## Native touchscreen milestone — Now Playing and Players
+
+The ESP32 now has two **mutually exclusive, full-viewport LVGL screens**:
+Now Playing and Player Selection. The 800×480 display never stacks views,
+and only the player list scrolls. Queue, Browse and Search remain future
+separate screens; they are **not** mixed into Now Playing.
+
+- **Now Playing:** player name is a large touch target opening Player
+  Selection; track/artist, Play/Pause, Previous, Next, Stop, and 10-point
+  volume decrement/increment are displayed.
+- **Player Selection:** a dedicated list of Music Assistant players, with a
+  Back button to Now Playing. Selecting a player returns immediately to Now
+  Playing and requests its live state.
+- The selected player ID is persisted under `controller/player_id` in NVS,
+  so subsequent restarts retain the selection. The initial ID provisioned
+  via `provision.py` remains the default on first boot.
+- Touch events enqueue actions for the firmware main task; the LVGL task
+  does not perform network operations. Responses from Music Assistant
+  remain authoritative for playback state and volume.
+- **Sonos Pause is disabled while playing** because of the previously
+  observed queue-hopping behaviour (Atlas #587). Stop remains available.
+- Player control commands use the existing allowlisted Atlas gateway; no
+  new Music Assistant credentials or gateway deployment are required.
+
+### Flash and acceptance
+
+Download the successful ESP32 Actions artifact for this PR. Flash
+`music-controller-full-flash.bin` at `0x0`, then reflash your **existing**
+private `controller-nvs.bin` at `0x9000`. The merged image overwrites NVS,
+so preserve this order. No regeneration of your device token or Wi-Fi
+credentials is needed.
+
+Verify on the Waveshare: Now Playing shows the previously selected player;
+tapping its name replaces the entire screen with the player list; Back
+returns to Now Playing; selecting another player updates metadata and
+survives RESET; Stop, Next, Previous, Play and volume reach the correct
+player. Confirm Sonos Pause remains unavailable while playing, and no
+network or player list appears behind the active screen.
+
+The source has not yet been hardware-tested for this milestone; review CI
+and serial logs before considering it validated.
