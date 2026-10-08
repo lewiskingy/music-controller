@@ -185,8 +185,8 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL));
     wifi_config_t cfg = {0};
-    snprintf((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), "%s", ssid);
-    snprintf((char *)cfg.sta.password, sizeof(cfg.sta.password), "%s", password);
+    memcpy(cfg.sta.ssid, ssid, strlen(ssid));
+    memcpy(cfg.sta.password, password, strlen(password));
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
