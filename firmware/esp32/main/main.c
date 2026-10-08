@@ -208,8 +208,10 @@ static void players_received(const cJSON *array) {
         if (!strcmp(players[i].id, preferred)) { chosen = &players[i]; break; }
     }
     if (!chosen && player_count) chosen = &players[0];
+    bool selection_changed = false;
     if (chosen) {
         bool changed = strcmp(player_id, chosen->id) != 0;
+        selection_changed = changed;
         snprintf(player_id, sizeof(player_id), "%s", chosen->id);
         snprintf(player_name, sizeof(player_name), "%s", chosen->name);
         current_volume = chosen->volume;
@@ -227,7 +229,7 @@ static void players_received(const cJSON *array) {
     players_dirty = true;
     screen_dirty = true;
     xSemaphoreGive(state_mutex);
-    refresh_pending = true;
+    if (selection_changed) refresh_pending = true;
 }
 static void queues_received(const cJSON *array) {
     if (!cJSON_IsArray(array) || !state_mutex) return;
@@ -549,6 +551,7 @@ void app_main(void) {
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
     bool started = false;
     int64_t last_refresh = 0;
+    int64_t last_heartbeat = 0;
     while (true) {
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
@@ -569,7 +572,11 @@ void app_main(void) {
             last_refresh = now;
             refresh();
         }
-        ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d screen=%d", (int)ip_ready, (int)ws_connected, (int)ready, (int)(title_label != NULL));
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (now - last_heartbeat >= 5000000LL) {
+            ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d view=%d",
+                     (int)ip_ready, (int)ws_connected, (int)ready, (int)active_view);
+            last_heartbeat = now;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
