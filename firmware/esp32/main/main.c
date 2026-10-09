@@ -858,7 +858,7 @@ static void dock_action(const ui_intent_t *intent) {
             if(item->available && !strcmp(item->id,intent->item_id)) {
                 browse_context_t *parent=&browse_stack[browse_depth], *next=&browse_stack[browse_depth+1];
                 memset(next,0,sizeof(*next));
-                snprintf(next->source,sizeof(next->source),"%s",parent->source);
+                memmove(next->source,parent->source,sizeof(next->source));
                 snprintf(next->provider,sizeof(next->provider),"%s",item->provider);
                 snprintf(next->id,sizeof(next->id),"%s",item->id); snprintf(next->title,sizeof(next->title),"%s",item->title);
                 snprintf(next->uri,sizeof(next->uri),"%s",item->uri);
