@@ -26,6 +26,8 @@ static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
 #define MAX_PLAYERS 20
+#define MAX_PROVIDERS 16
+#define PROVIDER_SELECTION_SIZE 2048
 typedef struct {
     char id[129];
     char name[96];
@@ -37,15 +39,21 @@ typedef struct {
 } player_info_t;
 static player_info_t players[MAX_PLAYERS];
 static size_t player_count;
+typedef struct { char id[96]; char name[96]; bool selected; } music_provider_t;
+static music_provider_t music_providers[MAX_PROVIDERS];
+static size_t music_provider_count;
+static char selected_provider_ids[PROVIDER_SELECTION_SIZE];
+static bool provider_selection_saved;
+static volatile bool providers_dirty = true;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
-typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS } view_t;
-typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP } action_type_t;
-typedef struct { action_type_t type; char player_id[129]; } action_t;
+typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
+typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE } action_type_t;
+typedef struct { action_type_t type; char player_id[129]; bool selected; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
-static lv_obj_t *now_screen, *players_screen;
+static lv_obj_t *now_screen, *players_screen, *providers_screen;
 static lv_obj_t *title_label, *artist_label, *player_label, *state_label, *volume_label, *play_button, *play_text;
-static lv_obj_t *players_list;
+static lv_obj_t *players_list, *providers_list;
 static volatile bool players_dirty = true;
 static int current_volume = 0;
 static bool current_playing, current_paused, current_available;
@@ -68,12 +76,14 @@ static void reset_ws_message(void) {
 }
 
 static void build_players_view(void);
+static void build_providers_view(void);
 static void update_now_playing(void);
 static void render(void) {
     if (!now_screen || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
     if (state_mutex && xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         update_now_playing();
         if (players_dirty) { build_players_view(); players_dirty = false; }
+        if (providers_dirty) { build_providers_view(); providers_dirty = false; }
         xSemaphoreGive(state_mutex);
     }
     lvgl_port_unlock();
@@ -264,6 +274,7 @@ static void handle_message(const char *payload, size_t len) {
         ESP_LOGI(TAG, "Gateway event: %s", event->valuestring);
         if (!strcmp(event->valuestring, "gateway/ready")) {
             ready = true; status("Connected"); refresh_pending = true;
+            request("providers", 'm');
         } else if (!strcmp(event->valuestring, "gateway/error")) {
             ready = false; status("Gateway authentication failed");
         } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
@@ -279,7 +290,8 @@ static void handle_message(const char *payload, size_t len) {
             status("Music Assistant API error");
         } else if (cJSON_IsArray(result)) {
             ESP_LOGI(TAG, "MA response %c: %d items", mid->valuestring[0], cJSON_GetArraySize(result));
-            if (mid->valuestring[0] == 'p') players_received(result);
+            if (mid->valuestring[0] == 'm') providers_received(result);
+            else if (mid->valuestring[0] == 'p') players_received(result);
             else if (mid->valuestring[0] == 'q') queues_received(result);
         } else ESP_LOGW(TAG, "MA response %c: unexpected shape", mid->valuestring[0]);
     }
@@ -362,6 +374,9 @@ static bool load_config(void) {
 #undef READ
     len=sizeof(preferred);
     nvs_get_str(n,"player_id",preferred,&len);
+    len = sizeof(selected_provider_ids);
+    if (nvs_get_str(n, "music_sources", selected_provider_ids, &len) == ESP_OK)
+        provider_selection_saved = true;
     nvs_close(n);
     return ssid[0] && token[0] && !strncmp(url,"wss://",6);
 }
