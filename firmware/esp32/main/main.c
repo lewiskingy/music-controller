@@ -45,6 +45,7 @@ static size_t music_provider_count;
 static char selected_provider_ids[PROVIDER_SELECTION_SIZE];
 static bool provider_selection_saved;
 static volatile bool providers_dirty = true;
+static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
 typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
@@ -349,7 +350,7 @@ static void handle_message(const char *payload, size_t len) {
         ESP_LOGI(TAG, "Gateway event: %s", event->valuestring);
         if (!strcmp(event->valuestring, "gateway/ready")) {
             ready = true; status("Connected"); refresh_pending = true;
-            request("providers", 'm');
+            provider_fetch_pending = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
             ready = false; status("Gateway authentication failed");
         } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
@@ -564,7 +565,7 @@ static void init_screen(void) {
     lv_obj_t *heading = lv_label_create(now_screen);
     lv_label_set_text(heading, "NOW PLAYING");
     lv_obj_set_style_text_color(heading, lv_color_hex(0xa8c3e3), 0);
-    lv_obj_align(heading, LV_ALIGN_TOP_LEFT, 22, 16);
+    lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 82);
 
     lv_obj_t *player_button = lv_btn_create(now_screen);
     lv_obj_set_size(player_button, 260, 58);
@@ -582,13 +583,13 @@ static void init_screen(void) {
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 105);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 136);
 
     artist_label = lv_label_create(now_screen);
     lv_obj_set_width(artist_label, 740);
     lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(artist_label, lv_color_hex(0xc0d1e8), 0);
-    lv_obj_align(artist_label, LV_ALIGN_TOP_MID, 0, 155);
+    lv_obj_align(artist_label, LV_ALIGN_TOP_MID, 0, 181);
 
     lv_obj_t *providers_button = lv_btn_create(now_screen);
     lv_obj_set_size(providers_button, 170, 58);
@@ -717,6 +718,10 @@ void app_main(void) {
             } else {
                 status("Waiting for network time...");
             }
+        }
+        if (ready && provider_fetch_pending) {
+            provider_fetch_pending = false;
+            request("providers", 'm');
         }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
