@@ -224,3 +224,31 @@ network or player list appears behind the active screen.
 
 The source has not yet been hardware-tested for this milestone; review CI
 and serial logs before considering it validated.
+
+## Music Provider selection and 5% volume stepping
+
+A dedicated full-screen **Music Providers** view is accessible from Now
+Playing. It uses Music Assistant's provider listing through the Atlas gateway
+(companion Atlas PR required), excludes non-music integrations, and presents
+checkboxes for available music sources. All are selected by default until the
+first user change. The selected provider IDs are stored independently of
+the output player ID in NVS under `controller/music_sources`. An intentionally
+empty selection is preserved.
+
+**Scope:** This milestone implements provider **discovery and selection**.
+Browse and Search screens and their provider-filtered API calls are roadmap
+follow-ups; the selection screen explicitly says so rather than claiming
+filters are already applied. Validate the installed Music Assistant version's
+provider listing response and `type=music`/instance ID fields during hardware
+testing. An API error must not be treated as an empty list.
+
+Volume touch controls use **5% boundaries**. The first upward press at 12%
+goes to 15%; the first downward press goes to 10%. From exactly 15%, the next
+press goes to 20% or 10% respectively. Values clamp at 0–100%. The UI reads
+back Music Assistant's reported volume; it does not assume a command succeeded.
+
+**Deploy order:** merge and deploy the companion Atlas gateway PR before
+flashing the firmware. Flash the full merged firmware image, then the
+existing private NVS image at `0x9000`. The first provider change is saved
+on-device and survives subsequent resets; re-flashing the full merged image
+and NVS resets the choice to the provisioned image's state.
