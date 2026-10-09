@@ -15,6 +15,8 @@ def test_exclusive_primary_views():
     assert '$("now-playing").hidden = !isHome' in APP
     assert '$("panel").hidden = isHome' in APP
     assert 'switchView("Now Playing")' in APP
+    assert 'id="home"' not in HTML
+    assert HTML.count('id="panel-back"') == 1
 
 
 def test_fixed_appliance_viewport_and_internal_scroll():
