@@ -522,6 +522,39 @@ static void build_players_view(void) {
         lv_obj_add_event_cb(button, player_clicked, LV_EVENT_CLICKED, players[i].id);
     }
 }
+
+static void provider_toggled(lv_event_t *event) {
+    lv_obj_t *checkbox = lv_event_get_target(event);
+    const char *id = lv_event_get_user_data(event);
+    if (!id) return;
+    action_t action = {.type = ACT_PROVIDER_TOGGLE};
+    snprintf(action.player_id, sizeof(action.player_id), "%s", id);
+    action.selected = lv_obj_has_state(checkbox, LV_STATE_CHECKED);
+    if (xQueueSend(action_queue, &action, 0) != pdTRUE)
+        ESP_LOGW(TAG, "Provider selection queue full");
+}
+static void open_providers(lv_event_t *event) {
+    active_view = VIEW_PROVIDERS;
+    lv_scr_load(providers_screen);
+}
+static void build_providers_view(void) {
+    if (!providers_list) return;
+    lv_obj_clean(providers_list);
+    if (!music_provider_count) {
+        lv_obj_t *label = lv_label_create(providers_list);
+        lv_label_set_text(label, "No music providers available");
+        return;
+    }
+    for (size_t i = 0; i < music_provider_count; ++i) {
+        lv_obj_t *checkbox = lv_checkbox_create(providers_list);
+        lv_checkbox_set_text(checkbox, music_providers[i].name);
+        lv_obj_set_width(checkbox, 690);
+        lv_obj_set_height(checkbox, 58);
+        if (music_providers[i].selected) lv_obj_add_state(checkbox, LV_STATE_CHECKED);
+        lv_obj_add_event_cb(checkbox, provider_toggled, LV_EVENT_VALUE_CHANGED, music_providers[i].id);
+    }
+}
+
 static void init_screen(void) {
     now_screen = lv_scr_act();
     lv_obj_set_style_bg_color(now_screen, lv_color_hex(0x121c30), 0);
@@ -557,6 +590,13 @@ static void init_screen(void) {
     lv_obj_set_style_text_color(artist_label, lv_color_hex(0xc0d1e8), 0);
     lv_obj_align(artist_label, LV_ALIGN_TOP_MID, 0, 155);
 
+    lv_obj_t *providers_button = lv_btn_create(now_screen);
+    lv_obj_set_size(providers_button, 170, 58);
+    lv_obj_align(providers_button, LV_ALIGN_TOP_LEFT, 18, 8);
+    lv_obj_add_event_cb(providers_button, open_providers, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *providers_text = lv_label_create(providers_button);
+    lv_label_set_text(providers_text, "Providers");
+    lv_obj_center(providers_text);
     make_button(now_screen, "Prev", 116, 222, 125, ACT_PREVIOUS);
     play_button = make_button(now_screen, "Play", 250, 222, 125, ACT_PLAY_PAUSE);
     play_text = lv_obj_get_child(play_button, 0);
@@ -593,6 +633,30 @@ static void init_screen(void) {
     players_list = lv_list_create(players_screen);
     lv_obj_set_size(players_list, 760, 365);
     lv_obj_align(players_list, LV_ALIGN_BOTTOM_MID, 0, -10);
+    providers_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(providers_screen, lv_color_hex(0x121c30), 0);
+    lv_obj_set_style_bg_opa(providers_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(providers_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *provider_title = lv_label_create(providers_screen);
+    lv_label_set_text(provider_title, "MUSIC PROVIDERS");
+    lv_obj_set_style_text_color(provider_title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(provider_title, &lv_font_montserrat_24, 0);
+    lv_obj_align(provider_title, LV_ALIGN_TOP_LEFT, 20, 24);
+    lv_obj_t *provider_back = lv_btn_create(providers_screen);
+    lv_obj_set_size(provider_back, 190, 58);
+    lv_obj_align(provider_back, LV_ALIGN_TOP_RIGHT, -18, 10);
+    lv_obj_add_event_cb(provider_back, back_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *provider_back_text = lv_label_create(provider_back);
+    lv_label_set_text(provider_back_text, "Back");
+    lv_obj_center(provider_back_text);
+    lv_obj_t *hint = lv_label_create(providers_screen);
+    lv_label_set_text(hint, "Choose sources for future Browse and Search");
+    lv_obj_set_style_text_color(hint, lv_color_hex(0xa8c3e3), 0);
+    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 20, 86);
+    providers_list = lv_obj_create(providers_screen);
+    lv_obj_set_size(providers_list, 760, 330);
+    lv_obj_align(providers_list, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_set_flex_flow(providers_list, LV_FLEX_FLOW_COLUMN);
     update_now_playing();
 }
 void app_main(void) {
@@ -656,7 +720,7 @@ void app_main(void) {
         }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
-        if (screen_dirty || players_dirty) { render(); screen_dirty = false; }
+        if (screen_dirty || players_dirty || providers_dirty) { render(); screen_dirty = false; }
         int64_t now = esp_timer_get_time();
         if (ready && (refresh_pending || now - last_refresh >= 30000000LL)) {
             refresh_pending = false;
