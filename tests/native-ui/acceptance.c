@@ -34,7 +34,7 @@ static void advance(unsigned ms) {
     lv_obj_update_layout(ui.root);
 }
 static void screenshot(const char *name) {
-    lv_obj_invalidate(ui.root); advance(100);
+    lv_obj_invalidate(ui.root); advance(350);
     char path[1024]; snprintf(path,sizeof(path),"%s/%s.ppm",output_dir,name);
     FILE *file = fopen(path,"wb"); CHECK(file != NULL);
     fprintf(file,"P6\n480 800\n255\n");
@@ -95,7 +95,7 @@ static void geometry(void) {
     for(unsigned i=0;i<4;i++) {
         lv_obj_t *caption=lv_obj_get_child(ui.navigation[i],0);
         CHECK(!strcmp(lv_label_get_text(caption),tabs[i])); fixed_caption(caption);
-        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i>1));
+        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i>2));
         lv_area_t tab=bounds(ui.navigation[i]);
         CHECK(tab.x1==8+(int)i*118 && tab.y1==742);
     }
@@ -125,7 +125,7 @@ int main(int argc,char **argv) {
     ui_playback_t state={.track="Daydreamer",.artist="Adele",.album="19",.player="Extension",
         .status="Connected",.player_id="room-a",.queue_id="queue-a",.item_id="track-a",
         .volume=45,.position=42,.duration=220,.connected=true,.available=true,.playing=true,
-        .can_volume=true,.can_seek=true,.can_queue=true};
+        .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true};
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
     click(ui.transport[0]); CHECK(intent_count==1 && last_intent.type==UI_PREVIOUS);
     click(ui.transport[1]); CHECK(intent_count==2 && last_intent.type==UI_PLAY_STOP);
@@ -217,7 +217,7 @@ int main(int argc,char **argv) {
         state.art_id="mock-album"; controller_ui_update(&ui,&state);
         CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
         unsigned count=intent_count;
-        for(unsigned i=2;i<4;i++) click(ui.navigation[i]);
+        for(unsigned i=3;i<4;i++) click(ui.navigation[i]);
         CHECK(intent_count==count && !lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
         click(ui.player_button); geometry();
         snprintf(name,sizeof(name),"theme-%s-%s-players",themes[p],mode?"light":"dark"); screenshot(name);
@@ -267,8 +267,98 @@ int main(int argc,char **argv) {
         controller_ui_queue(&ui,rows,20,0,25,state.item_id,"Tap a track to play",false,true);
         char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-queue",themes[p],mode?"light":"dark"); screenshot(name); geometry();
     }
+    controller_ui_set_theme(&ui,0,false);
+    click(ui.navigation[2]); CHECK(last_intent.type==UI_BROWSE_OPEN);
+    CHECK(!lv_obj_has_flag(ui.browse_content,LV_OBJ_FLAG_HIDDEN));
+    ui_media_item_t catalogue[UI_QUEUE_PAGE_SIZE]={0};
+    snprintf(catalogue[0].id,sizeof(catalogue[0].id),"navidrome");
+    snprintf(catalogue[0].provider,sizeof(catalogue[0].provider),"navidrome");
+    snprintf(catalogue[0].title,sizeof(catalogue[0].title),"Navidrome");
+    snprintf(catalogue[0].subtitle,sizeof(catalogue[0].subtitle),"Albums, artists and playlists");
+    catalogue[0].kind=UI_MEDIA_SOURCE; catalogue[0].available=true;
+    controller_ui_browse(&ui,catalogue,1,"Music sources","Choose a music source",false,true,false,false,false,"",100);
+    screenshot("browse-sources"); geometry();
+    click(ui.browse_rows[0]); CHECK(last_intent.type==UI_BROWSE_SELECT && last_intent.generation==100);
+    CHECK(!strcmp(last_intent.provider,"navidrome"));
+    const char *category_names[]={"Albums","Artists","Playlists","Provider folders"};
+    const char *category_ids[]={"albums","artists","playlists","folders"};
+    for(unsigned i=0;i<4;i++) {
+        snprintf(catalogue[i].id,sizeof(catalogue[i].id),"%s",category_ids[i]);
+        snprintf(catalogue[i].title,sizeof(catalogue[i].title),"%s",category_names[i]);
+        snprintf(catalogue[i].provider,sizeof(catalogue[i].provider),"navidrome");
+        catalogue[i].subtitle[0]=0; catalogue[i].uri[0]=0; catalogue[i].kind=UI_MEDIA_CATEGORY; catalogue[i].available=true;
+    }
+    controller_ui_browse(&ui,catalogue,4,"Navidrome","Choose a category",false,true,true,false,false,"",101);
+    screenshot("browse-categories"); geometry(); click(ui.browse_rows[0]);
+    CHECK(!strcmp(last_intent.item_id,"albums"));
+    for(unsigned i=0;i<20;i++) {
+        snprintf(catalogue[i].id,sizeof(catalogue[i].id),"album-%u",i+1);
+        snprintf(catalogue[i].title,sizeof(catalogue[i].title),i==0?"19":"Album %u",i+1);
+        snprintf(catalogue[i].provider,sizeof(catalogue[i].provider),"library");
+        snprintf(catalogue[i].uri,sizeof(catalogue[i].uri),"library://album/%u",i+1);
+        snprintf(catalogue[i].subtitle,sizeof(catalogue[i].subtitle),"Adele");
+        catalogue[i].kind=UI_MEDIA_ALBUM; catalogue[i].available=true;
+    }
+    controller_ui_browse(&ui,catalogue,20,"Albums","Choose an album",false,true,true,false,true,"",102);
+    screenshot("browse-albums"); geometry(); click(ui.browse_rows[0]);
+    CHECK(last_intent.type==UI_BROWSE_SELECT && !strcmp(last_intent.media_uri,"library://album/1"));
+    click(ui.browse_more); CHECK(last_intent.type==UI_BROWSE_MORE);
+    controller_ui_browse(&ui,catalogue,5,"Albums","Choose an album",false,true,true,true,false,"",103);
+    click(ui.browse_previous); CHECK(last_intent.type==UI_BROWSE_PREVIOUS);
+    click(ui.browse_refresh); CHECK(last_intent.type==UI_BROWSE_REFRESH);
+    catalogue[0].kind=UI_MEDIA_ARTIST; snprintf(catalogue[0].title,sizeof(catalogue[0].title),"Adele");
+    controller_ui_browse(&ui,catalogue,1,"Artists","Choose an artist",false,true,true,false,false,"",104); screenshot("browse-artists"); geometry();
+    catalogue[0].kind=UI_MEDIA_PLAYLIST; snprintf(catalogue[0].title,sizeof(catalogue[0].title),"Evening music");
+    controller_ui_browse(&ui,catalogue,1,"Playlists","Choose a playlist",false,true,true,false,false,"",105); screenshot("browse-playlists"); geometry();
+    for(unsigned i=0;i<20;i++) {
+        catalogue[i].kind=UI_MEDIA_TRACK;
+        snprintf(catalogue[i].uri,sizeof(catalogue[i].uri),"library://track/%u",i+1);
+        snprintf(catalogue[i].title,sizeof(catalogue[i].title),i==0?"Daydreamer":"Track %u",i+1);
+    }
+    catalogue[2].available=false;
+    controller_ui_browse(&ui,catalogue,20,"19","Tap a track or Play all",false,true,true,false,false,"library://album/1",106);
+    screenshot("browse-album-tracks"); geometry();
+    click(ui.browse_rows[0]); CHECK(last_intent.type==UI_BROWSE_PLAY && !strcmp(last_intent.media_uri,"library://track/1"));
+    CHECK(!strcmp(last_intent.player_id,"room-a") && !strcmp(last_intent.queue_id,"queue-a"));
+    before=intent_count; click(ui.browse_rows[2]); CHECK(intent_count==before);
+    click(ui.browse_play_all); CHECK(last_intent.type==UI_BROWSE_PLAY_ALL && !strcmp(last_intent.media_uri,"library://album/1"));
+    state.transport_pending=true; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.browse_play_all,LV_STATE_DISABLED));
+    state.transport_pending=false; state.player_id="other-room"; controller_ui_update(&ui,&state);
+    before=intent_count; click(ui.browse_rows[0]); click(ui.browse_play_all); CHECK(intent_count==before);
+    state.player_id="room-a"; controller_ui_update(&ui,&state);
+    controller_ui_browse(&ui,NULL,0,"19","Loading music...",true,false,true,false,false,"library://album/1",107);
+    controller_ui_update(&ui,&state); CHECK(lv_obj_has_state(ui.browse_play_all,LV_STATE_DISABLED));
+    screenshot("browse-loading"); geometry(); click(ui.browse_back); CHECK(last_intent.type==UI_BROWSE_BACK);
+    controller_ui_browse(&ui,NULL,0,"Albums","No items in this source",false,true,true,false,false,"",108); screenshot("browse-empty"); geometry();
+    controller_ui_browse(&ui,NULL,0,"Albums","Could not browse - tap Refresh",false,false,true,false,false,"",109); screenshot("browse-error"); geometry();
+    catalogue[0].kind=UI_MEDIA_FOLDER; snprintf(catalogue[0].title,sizeof(catalogue[0].title),"Recommended albums");
+    snprintf(catalogue[0].uri,sizeof(catalogue[0].uri),"navidrome://albums/recommended");
+    controller_ui_browse(&ui,catalogue,1,"Provider folders","Choose a folder",false,true,true,false,false,"",110); screenshot("browse-folders"); geometry();
+    click(ui.browse_rows[0]); CHECK(last_intent.type==UI_BROWSE_SELECT && !strcmp(last_intent.media_uri,"navidrome://albums/recommended"));
+    state.connected=false; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.browse_rows[0],LV_STATE_DISABLED)); screenshot("browse-disconnected"); geometry();
+    state.connected=true; controller_ui_update(&ui,&state);
+    for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
+        controller_ui_set_theme(&ui,p,mode);
+        for(unsigned i=0;i<4;i++) {
+            catalogue[i].kind=UI_MEDIA_CATEGORY; catalogue[i].available=true;
+            snprintf(catalogue[i].title,sizeof(catalogue[i].title),"%s",category_names[i]);
+            catalogue[i].subtitle[0]=0;
+        }
+        controller_ui_browse(&ui,catalogue,4,"Navidrome","Choose a category",false,true,true,false,false,"",111);
+        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-browse",themes[p],mode?"light":"dark"); screenshot(name); geometry();
+        for(unsigned i=0;i<20;i++) {
+            catalogue[i].kind=UI_MEDIA_TRACK;
+            snprintf(catalogue[i].uri,sizeof(catalogue[i].uri),"library://track/%u",i+1);
+            snprintf(catalogue[i].title,sizeof(catalogue[i].title),i==0?"Daydreamer":"Track %u",i+1);
+            snprintf(catalogue[i].subtitle,sizeof(catalogue[i].subtitle),"Adele");
+        }
+        controller_ui_browse(&ui,catalogue,20,"19","Tap a track or Play all",false,true,true,false,false,"library://album/1",112);
+        snprintf(name,sizeof(name),"theme-%s-%s-browse-tracks",themes[p],mode?"light":"dark"); screenshot(name); geometry();
+    }
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    printf("PASS: %u layout and interaction checks; 91 screenshots at 480x800\n",checks);
+    printf("PASS: %u layout and interaction checks; 126 screenshots at 480x800\n",checks);
     free(album_packet); free(generic_packet);
     return 0;
 }

@@ -178,6 +178,32 @@ static void queue_clicked(lv_event_t *event) {
         send_intent(ui,UI_QUEUE_PLAY,0,&ui->queue_targets[i]); break;
     }
 }
+static void browse_clicked(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_t *target=lv_event_get_target(event);
+    if(target==ui->navigation[2]) {
+        controller_ui_show(ui,UI_BROWSE); send_intent(ui,UI_BROWSE_OPEN,0,&ui->current);
+    } else if(target==ui->browse_back) send_intent(ui,UI_BROWSE_BACK,0,&ui->current);
+    else if(target==ui->browse_refresh) send_intent(ui,UI_BROWSE_REFRESH,0,&ui->current);
+    else if(target==ui->browse_previous) send_intent(ui,UI_BROWSE_PREVIOUS,0,&ui->current);
+    else if(target==ui->browse_more) send_intent(ui,UI_BROWSE_MORE,0,&ui->current);
+    else if(target==ui->browse_play_all) send_intent(ui,UI_BROWSE_PLAY_ALL,0,&ui->browse_album);
+    else for(unsigned i=0;i<ui->browse_count;i++) if(target==ui->browse_rows[i]) {
+        send_intent(ui,ui->browse_kinds[i]==UI_MEDIA_TRACK?UI_BROWSE_PLAY:UI_BROWSE_SELECT,(int)i,&ui->browse_targets[i]); break;
+    }
+}
+/* Reusable two-line media row for browse results and other catalogue lists. */
+static lv_obj_t *media_row(lv_obj_t *parent,const char *title,const char *subtitle,
+                           const char *marker,lv_event_cb_t callback,controller_ui_t *ui) {
+    lv_obj_t *row=button(parent,"",0,0,352,72,callback,ui);
+    lv_obj_set_flex_grow(row,0); lv_obj_set_style_pad_all(row,0,0);
+    lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE); lv_obj_del(lv_obj_get_child(row,0));
+    bg(row,SURFACE,0);
+    label(row,marker,8,24,24,ACCENT,false);
+    label(row,title,40,8,300,TEXT,false);
+    label(row,subtitle,40,38,300,MUTED,false);
+    return row;
+}
 static lv_obj_t *slider(lv_obj_t *parent, int x, int y, int w, int h, controller_ui_t *ui) {
     lv_obj_t *obj = lv_slider_create(parent);
     lv_obj_set_pos(obj, x, y);
@@ -286,8 +312,8 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_t *nav = panel(root, 0, UI_NAV_Y, UI_WIDTH, UI_NAV_HEIGHT, BG);
     const char *tabs[] = {"Playing", "Queue", "Browse", "Search"};
     for (unsigned i=0;i<4;i++) {
-        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:(i==1?queue_clicked:NULL),i==1?ui:NULL);
-        if(i>1) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
+        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:(i==1?queue_clicked:(i==2?browse_clicked:NULL)),i==1 || i==2?ui:NULL);
+        if(i>2) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
     }
     ui->queue_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     ui->queue_info=label(ui->queue_content,"Queue",24,20,352,MUTED,false);
@@ -298,6 +324,18 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->queue_refresh=button(ui->queue_content,"Refresh",132,452,136,48,queue_clicked,ui);
     ui->queue_more=button(ui->queue_content,"Next",276,452,100,48,queue_clicked,ui);
     ui->queue_feedback=label(ui->queue_content,"Open Queue to load tracks",24,504,352,MUTED,false);
+    ui->browse_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
+    ui->browse_info=label(ui->browse_content,"Music sources",24,20,244,MUTED,false);
+    ui->browse_back=button(ui->browse_content,"Back",280,8,96,48,browse_clicked,ui);
+    ui->browse_play_all=button(ui->browse_content,"Play all",24,52,352,48,browse_clicked,ui);
+    lv_obj_add_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
+    ui->browse_list=panel(ui->browse_content,24,60,352,380,BG);
+    lv_obj_add_flag(ui->browse_list,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(ui->browse_list,LV_FLEX_FLOW_COLUMN);
+    ui->browse_previous=button(ui->browse_content,"Previous",24,452,100,48,browse_clicked,ui);
+    ui->browse_refresh=button(ui->browse_content,"Refresh",132,452,136,48,browse_clicked,ui);
+    ui->browse_more=button(ui->browse_content,"Next",276,452,100,48,browse_clicked,ui);
+    ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,352,MUTED,false);
     ui->settings_content = panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     label(ui->settings_content,"Colour palette",24,20,352,TEXT,true);
     for(unsigned i=0;i<6;i++) {
@@ -317,17 +355,17 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     controller_ui_show(ui, UI_PLAYING);
 }
 void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
-    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content};
-    for (unsigned i = 0; i < 5; ++i) {
+    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content, ui->browse_content};
+    for (unsigned i = 0; i < 6; ++i) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
     }
-    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue"};
+    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue", "Browse"};
     lv_label_set_text(ui->heading, titles[view]);
     for (unsigned i = 0; i < 4; ++i) {
         lv_obj_remove_style(ui->navigation[i], &backgrounds[ACTIVE], 0);
         lv_obj_remove_style(ui->navigation[i], &backgrounds[BG], 0);
-        bg(ui->navigation[i], ((i == 0 && view == UI_PLAYING) || (i == 1 && view == UI_QUEUE)) ? ACTIVE : BG, 0);
+        bg(ui->navigation[i], ((i == 0 && view == UI_PLAYING) || (i == 1 && view == UI_QUEUE) || (i == 2 && view == UI_BROWSE)) ? ACTIVE : BG, 0);
     }
 }
 static void enabled(lv_obj_t *obj, bool value) {
@@ -344,6 +382,16 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
         for(unsigned i=0;i<2;i++) lv_obj_clear_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
     }
     bool player_changed = strcmp(ui->current.player_id, state->player_id) != 0;
+    bool browse_play=state->connected && state->available && state->can_browse && !state->transport_pending;
+    for(unsigned i=0;i<ui->browse_count;i++) {
+        bool playable=ui->browse_kinds[i]==UI_MEDIA_TRACK;
+        bool same=!strcmp(ui->browse_targets[i].player_id,state->player_id) &&
+                  !strcmp(ui->browse_targets[i].queue_id,state->queue_id);
+        enabled(ui->browse_rows[i],ui->browse_targets[i].value &&
+            !ui->browse_loading && (playable ? browse_play && same : state->connected && state->can_browse));
+    }
+    enabled(ui->browse_play_all,!ui->browse_loading && browse_play && ui->browse_album.media_uri[0] &&
+        !strcmp(ui->browse_album.player_id,state->player_id) && !strcmp(ui->browse_album.queue_id,state->queue_id));
     ui->queue_enabled=state->connected && state->available && state->can_queue && !state->transport_pending;
     for(unsigned i=0;i<ui->queue_count;i++) {
         bool same=!strcmp(ui->queue_targets[i].player_id,state->player_id) &&
@@ -443,14 +491,10 @@ void controller_ui_queue(controller_ui_t *ui, const ui_queue_item_t *items, unsi
     enabled(ui->queue_refresh,!loading);
     for(unsigned i=0;i<count;i++) {
         bool selected=current_item && !strcmp(items[i].id,current_item);
-        lv_obj_t *row=button(ui->queue_list,"",0,0,352,72,queue_clicked,ui);
-        lv_obj_set_flex_grow(row,0); lv_obj_set_style_pad_all(row,0,0);
-        lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_del(lv_obj_get_child(row,0));
+        lv_obj_t *row=media_row(ui->queue_list,items[i].title,items[i].artist,
+            selected?LV_SYMBOL_PLAY:"",queue_clicked,ui);
         bg(row,selected?ACTIVE:SURFACE,0);
-        label(row,selected?LV_SYMBOL_PLAY:"",8,24,24,ACCENT,false);
-        label(row,items[i].title,40,8,300,TEXT,false);
-        label(row,items[i].artist,40,38,224,MUTED,false);
+        lv_obj_set_width(lv_obj_get_child(row,2),224);
         char duration[24];
         if(items[i].duration>0) snprintf(duration,sizeof(duration),"%d:%02d",items[i].duration/60,items[i].duration%60);
         else snprintf(duration,sizeof(duration),"--:--");
@@ -460,5 +504,35 @@ void controller_ui_queue(controller_ui_t *ui, const ui_queue_item_t *items, unsi
         ui->queue_targets[i].value=items[i].available && items[i].id[0];
         enabled(row,!loading && can_play && ui->queue_targets[i].value);
         ui->queue_rows[i]=row; ui->queue_count++;
+    }
+}
+
+void controller_ui_browse(controller_ui_t *ui, const ui_media_item_t *items, unsigned count,
+    const char *heading, const char *message, bool loading, bool can_play,
+    bool can_back, bool previous, bool more, const char *parent_uri, unsigned generation) {
+    lv_obj_clean(ui->browse_list); ui->browse_count=0; ui->browse_loading=loading;
+    if(count>UI_QUEUE_PAGE_SIZE) count=UI_QUEUE_PAGE_SIZE;
+    lv_label_set_text(ui->browse_info,heading); lv_label_set_text(ui->browse_feedback,message);
+    enabled(ui->browse_back,can_back); enabled(ui->browse_previous,!loading && previous);
+    enabled(ui->browse_more,!loading && more); enabled(ui->browse_refresh,!loading);
+    bool album=parent_uri && parent_uri[0];
+    if(album) lv_obj_clear_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(ui->browse_list,24,album?112:60); lv_obj_set_height(ui->browse_list,album?328:380);
+    ui->browse_album=ui->current; ui->browse_album.generation=generation;
+    snprintf(ui->browse_album.media_uri,sizeof(ui->browse_album.media_uri),"%s",album?parent_uri:"");
+    enabled(ui->browse_play_all,!loading && can_play && album);
+    for(unsigned i=0;i<count;i++) {
+        bool playable=items[i].kind==UI_MEDIA_TRACK;
+        lv_obj_t *row=media_row(ui->browse_list,items[i].title,items[i].subtitle,
+            playable?LV_SYMBOL_PLAY:LV_SYMBOL_RIGHT,browse_clicked,ui);
+        ui->browse_targets[i]=ui->current; ui->browse_targets[i].generation=generation;
+        snprintf(ui->browse_targets[i].item_id,sizeof(ui->browse_targets[i].item_id),"%s",items[i].id);
+        snprintf(ui->browse_targets[i].provider,sizeof(ui->browse_targets[i].provider),"%s",items[i].provider);
+        snprintf(ui->browse_targets[i].media_uri,sizeof(ui->browse_targets[i].media_uri),"%s",items[i].uri);
+        ui->browse_targets[i].value=items[i].available;
+        ui->browse_kinds[i]=items[i].kind;
+        enabled(row,!loading && items[i].available && (!playable || can_play));
+        ui->browse_rows[i]=row; ui->browse_count++;
     }
 }

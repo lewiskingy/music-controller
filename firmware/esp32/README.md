@@ -413,7 +413,7 @@ python tests/native-ui/convert_screenshots.py artifacts/native-ui
 
 The header cog opens appearance settings. Six palettes (Green, Blue, Red, Orange, Purple, Grey) each support Dark and Light modes. Shared semantic LVGL styles apply to existing controls and newly created player/source rows. Selection is stored as `ui_palette` and `ui_light` in the `controller` NVS namespace and restored on boot. Invalid palette values fall back to Green.
 
-The bottom tabs match the design: Playing, Queue, Browse, Search. The last three are visible but disabled while their functionality is developed. Use the header player selector for Players and Settings → Music sources for provider selection.
+The bottom tabs match the design: Playing, Queue, Browse, Search. Playing, Queue and Browse are functional; Search remains visible but disabled. Use the header player selector for Players and Settings → Music sources for provider selection.
 
 Native acceptance captures 58 screenshots: ten playback/interaction states plus Playing, Settings, Players and Music Sources in each of the twelve themes. Checks include fixed caption fit (including the volume heading), tab positions/order and disabled interaction, persistent dock geometry and containment.
 
@@ -427,8 +427,18 @@ Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`,
 
 ### Queue
 
-Queue is enabled in the bottom navigation. It opens the page containing the selected player's current queue index, loads at most 20 tracks, highlights the current item, and shows artist and duration. Previous/Next page controls bound memory; Refresh retries the current page. Loading, empty, API error, timeout, disconnected, unavailable-track and older-gateway states are explicit. Browse and Search remain disabled.
+Queue is enabled in the bottom navigation. It opens the page containing the selected player's current queue index, loads at most 20 tracks, highlights the current item, and shows artist and duration. Previous/Next page controls bound memory; Refresh retries the current page. Loading, empty, API error, timeout, disconnected, unavailable-track and older-gateway states are explicit. Search remains disabled.
 
 Tap-to-play sends `player_queues/play_index` with the stable queue item ID as `index`, not a numeric position. The companion gateway advertises `queue_item_play` and validates either form. Removed items fail through the API rather than playing a replacement at the same position. Responses match request ID, player, queue and offset; row taps capture player/queue/item identity. Playback remains authoritative and transport pending/ACK/timeout handling is reused.
 
 Acceptance includes mocked queue loading, 20-item pages, last page, row playback, disabled/unavailable rows, stale player targets, errors, disconnection and twelve themed Queue screenshots. Total native screenshot count: 91. Gateway contract tests cover stable IDs and bounded pagination.
+
+### Browse
+
+Browse starts with the selected music sources, then Albums, Artists, Playlists and Provider folders. Artists open albums; albums and playlists open tracks. Track taps and Play all send `player_queues/play_media` with the stable media URI and `option: replace` to the captured selected queue. This replaces that queue; selecting a source never switches the output player.
+
+A shared two-line media row and the persistent transport/volume docks serve Queue and Browse. Pages hold at most 20 items, navigation is bounded to eight contexts, and Back, Refresh and page controls stay inside the content pane. Request IDs and navigation generations reject stale responses. Loading, empty, disconnected, unsupported-gateway, unavailable-item, API-error and ten-second timeout states are explicit. Playback taps also validate the selected player and queue.
+
+The gateway advertises `browse` and translates `controller/browse` into fixed Music Assistant read commands, returning compact metadata. Library categories filter the selected provider; Provider folders exposes its native browse hierarchy where supported. This requires the companion Atlas feature branch. Search remains the next functional destination.
+
+Native acceptance now passes 19,672 checks and captures 126 screenshots, including Browse sources, categories, albums, artists, playlists, tracks, folders and failure states, plus Browse categories and tracks in all twelve themes. Gateway acceptance includes a real device WebSocket against a mocked Music Assistant upstream, partial responses, provider identity and bounded pagination. Physical touch and live-provider validation remain pending.
