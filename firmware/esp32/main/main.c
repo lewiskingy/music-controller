@@ -27,6 +27,15 @@ static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
 #define MAX_PLAYERS 20
+#define QUEUE_PAGE_SIZE 30
+typedef struct { char title[128]; char artist[96]; int index; } queue_row_t;
+static queue_row_t queue_rows[QUEUE_PAGE_SIZE];
+static size_t queue_row_count;
+static int queue_offset, queue_current_index = -1;
+static bool queue_has_more, queue_loading;
+static char queue_target[129], queue_request_target[129];
+static int queue_request_offset;
+static volatile bool queue_dirty = true, queue_fetch_pending;
 #define MAX_PROVIDERS 16
 #define PROVIDER_SELECTION_SIZE 2048
 typedef struct {
@@ -49,13 +58,13 @@ static volatile bool providers_dirty = true;
 static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
-typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
-typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE } action_type_t;
-typedef struct { action_type_t type; char player_id[129]; bool selected; } action_t;
+typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS, VIEW_QUEUE } view_t;
+typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_QUEUE_PLAY, ACT_QUEUE_PREV_PAGE, ACT_QUEUE_NEXT_PAGE } action_type_t;
+typedef struct { action_type_t type; char player_id[129]; bool selected; int queue_index; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
-static lv_obj_t *now_screen, *players_screen, *providers_screen;
+static lv_obj_t *now_screen, *players_screen, *providers_screen, *queue_screen;
 static lv_obj_t *title_label, *artist_label, *player_label, *state_label, *volume_label, *play_button, *play_text;
-static lv_obj_t *players_list, *providers_list, *provider_save_status;
+static lv_obj_t *players_list, *providers_list, *provider_save_status, *queue_list, *queue_status_label, *queue_prev_button, *queue_next_button;
 static volatile bool players_dirty = true;
 static int current_volume = 0;
 static bool current_playing, current_paused, current_available;
@@ -81,6 +90,9 @@ static void save_music_providers(void);
 static void providers_received(const cJSON *array);
 static void build_players_view(void);
 static void build_providers_view(void);
+static void build_queue_view(void);
+static void play_queue_index(int index);
+static void queue_items_received(const cJSON *result);
 static void update_now_playing(void);
 static void render(void) {
     if (!now_screen || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
@@ -88,6 +100,7 @@ static void render(void) {
         update_now_playing();
         if (players_dirty) { build_players_view(); players_dirty = false; }
         if (providers_dirty) { build_providers_view(); providers_dirty = false; }
+        if (queue_dirty) { build_queue_view(); queue_dirty = false; }
         xSemaphoreGive(state_mutex);
     }
     lvgl_port_unlock();
@@ -145,6 +158,20 @@ static void save_preferred_player(const char *id) {
     else ESP_LOGI(TAG, "Player selection saved to NVS");
 }
 static void process_action(const action_t *action) {
+    if (action->type == ACT_QUEUE_PLAY) {
+        if (!strcmp(action->player_id, queue_target)) play_queue_index(action->queue_index);
+        return;
+    }
+    if (action->type == ACT_QUEUE_PREV_PAGE || action->type == ACT_QUEUE_NEXT_PAGE) {
+        if (queue_loading || active_view != VIEW_QUEUE) return;
+        if (action->type == ACT_QUEUE_PREV_PAGE && queue_offset >= QUEUE_PAGE_SIZE)
+            queue_offset -= QUEUE_PAGE_SIZE;
+        else if (action->type == ACT_QUEUE_NEXT_PAGE && queue_has_more)
+            queue_offset += QUEUE_PAGE_SIZE;
+        else return;
+        queue_fetch_pending = true;
+        return;
+    }
     if (action->type == ACT_PROVIDER_SAVE) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         save_music_providers();
@@ -175,6 +202,12 @@ static void process_action(const action_t *action) {
             snprintf(player_id, sizeof(player_id), "%s", action->player_id);
             snprintf(track, sizeof(track), "Loading player...");
             artist[0] = 0;
+            snprintf(queue_target, sizeof(queue_target), "%s", player_id);
+            queue_offset = 0;
+            queue_row_count = 0;
+            queue_has_more = false;
+            queue_loading = false;
+            queue_dirty = true;
             players_dirty = true;
             screen_dirty = true;
         }
@@ -210,6 +243,88 @@ static void process_action(const action_t *action) {
     }
     command_with_args(command, player_id, volume, volume_command);
     refresh_pending = true;
+}
+
+
+static void request_queue_page(void) {
+    if (!ready || !queue_target[0]) return;
+    cJSON *message = cJSON_CreateObject();
+    cJSON *args = cJSON_CreateObject();
+    if (!message || !args) { cJSON_Delete(message); cJSON_Delete(args); return; }
+    char message_id[24];
+    snprintf(message_id, sizeof(message_id), "i%u", ++request_id);
+    cJSON_AddStringToObject(message, "message_id", message_id);
+    cJSON_AddStringToObject(message, "command", "player_queues/items");
+    cJSON_AddStringToObject(args, "queue_id", queue_target);
+    cJSON_AddNumberToObject(args, "limit", QUEUE_PAGE_SIZE);
+    cJSON_AddNumberToObject(args, "offset", queue_offset);
+    cJSON_AddItemToObject(message, "args", args);
+    char *payload = cJSON_PrintUnformatted(message);
+    if (payload) {
+        snprintf(queue_request_target, sizeof(queue_request_target), "%s", queue_target);
+        queue_request_offset = queue_offset;
+        queue_loading = true;
+        queue_dirty = true;
+        ESP_LOGI(TAG, "Queue page request offset=%d limit=%d", queue_offset, QUEUE_PAGE_SIZE);
+        int sent = esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+        if (sent < 0) { queue_loading = false; status("Queue request failed"); }
+        free(payload);
+    }
+    cJSON_Delete(message);
+}
+static void play_queue_index(int index) {
+    if (!ready || !queue_target[0] || index < 0) return;
+    cJSON *message = cJSON_CreateObject();
+    cJSON *args = cJSON_CreateObject();
+    if (!message || !args) { cJSON_Delete(message); cJSON_Delete(args); return; }
+    char message_id[24];
+    snprintf(message_id, sizeof(message_id), "x%u", ++request_id);
+    cJSON_AddStringToObject(message, "message_id", message_id);
+    cJSON_AddStringToObject(message, "command", "player_queues/play_index");
+    cJSON_AddStringToObject(args, "queue_id", queue_target);
+    cJSON_AddNumberToObject(args, "index", index);
+    cJSON_AddItemToObject(message, "args", args);
+    char *payload = cJSON_PrintUnformatted(message);
+    if (payload) {
+        ESP_LOGI(TAG, "Playing queue index %d", index);
+        esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+        free(payload);
+    }
+    cJSON_Delete(message);
+}
+static void queue_items_received(const cJSON *result) {
+    if (!cJSON_IsArray(result) || !state_mutex) {
+        queue_loading = false;
+        status("Queue response unavailable");
+        return;
+    }
+    if (strcmp(queue_request_target, queue_target) || queue_request_offset != queue_offset) {
+        ESP_LOGW(TAG, "Discarding stale queue page");
+        return;
+    }
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    queue_row_count = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, result) {
+        if (queue_row_count >= QUEUE_PAGE_SIZE) break;
+        queue_row_t *row = &queue_rows[queue_row_count];
+        memset(row, 0, sizeof(*row));
+        row->index = queue_offset + (int)queue_row_count;
+        const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
+        if (!cJSON_IsObject(media)) media = item;
+        field(row->title, sizeof(row->title), media, "name");
+        if (!row->title[0]) snprintf(row->title, sizeof(row->title), "Untitled track");
+        const cJSON *artists = cJSON_GetObjectItemCaseSensitive(media, "artists");
+        const cJSON *first = cJSON_GetArrayItem(artists, 0);
+        if (first) field(row->artist, sizeof(row->artist), first, "name");
+        if (!row->artist[0]) field(row->artist, sizeof(row->artist), media, "artist");
+        queue_row_count++;
+    }
+    queue_has_more = queue_row_count == QUEUE_PAGE_SIZE;
+    queue_loading = false;
+    queue_dirty = true;
+    xSemaphoreGive(state_mutex);
+    ESP_LOGI(TAG, "Queue page received: %u items", (unsigned)queue_row_count);
 }
 
 static void refresh(void) {
@@ -255,7 +370,17 @@ static void players_received(const cJSON *array) {
         current_available = chosen->available;
         current_sonos = strstr(chosen->provider, "sonos") != NULL ||
                         strstr(chosen->provider, "SONOS") != NULL;
-        if (changed) { snprintf(track, sizeof(track), "Loading player..."); artist[0] = 0; }
+        if (changed) {
+            snprintf(track, sizeof(track), "Loading player...");
+            artist[0] = 0;
+            snprintf(queue_target, sizeof(queue_target), "%s", player_id);
+            queue_offset = 0;
+            queue_row_count = 0;
+            queue_has_more = false;
+            queue_loading = false;
+            queue_dirty = true;
+            if (active_view == VIEW_QUEUE) queue_fetch_pending = true;
+        }
     } else {
         player_id[0] = 0;
         snprintf(player_name, sizeof(player_name), "No players");
@@ -342,6 +467,8 @@ static void queues_received(const cJSON *array) {
     cJSON_ArrayForEach(queue, array) {
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(queue, "queue_id");
         if (!cJSON_IsString(id) || strcmp(id->valuestring, player_id)) continue;
+        const cJSON *index = cJSON_GetObjectItemCaseSensitive(queue, "current_index");
+        queue_current_index = cJSON_IsNumber(index) ? index->valueint : -1;
         const cJSON *item = cJSON_GetObjectItemCaseSensitive(queue, "current_item");
         const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
         if (!cJSON_IsObject(media)) media = item;
@@ -354,6 +481,7 @@ static void queues_received(const cJSON *array) {
             if (first) field(artist, sizeof(artist), first, "name");
         }
         screen_dirty = true;
+        if (active_view == VIEW_QUEUE && !queue_loading) queue_fetch_pending = true;
         xSemaphoreGive(state_mutex);
         return;
     }
@@ -379,6 +507,7 @@ static void handle_message(const char *payload, size_t len) {
     const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
     if (cJSON_IsString(mid)) {
         if (error && !cJSON_IsNull(error) && !cJSON_IsFalse(error)) {
+            if (mid->valuestring[0] == 'i') { queue_loading = false; queue_dirty = true; }
             ESP_LOGE(TAG, "MA response %c returned error", mid->valuestring[0]);
             status("Music Assistant API error");
         } else if (cJSON_IsArray(result)) {
@@ -386,7 +515,11 @@ static void handle_message(const char *payload, size_t len) {
             if (mid->valuestring[0] == 'm') providers_received(result);
             else if (mid->valuestring[0] == 'p') players_received(result);
             else if (mid->valuestring[0] == 'q') queues_received(result);
-        } else ESP_LOGW(TAG, "MA response %c: unexpected shape", mid->valuestring[0]);
+            else if (mid->valuestring[0] == 'i') queue_items_received(result);
+        } else {
+            if (mid->valuestring[0] == 'i') { queue_loading = false; queue_dirty = true; }
+            ESP_LOGW(TAG, "MA response %c: unexpected shape", mid->valuestring[0]);
+        }
     }
     cJSON_Delete(msg);
 }
@@ -578,6 +711,69 @@ static void build_providers_view(void) {
     }
 }
 
+
+static void open_queue(lv_event_t *event) {
+    active_view = VIEW_QUEUE;
+    lv_scr_load(queue_screen);
+    queue_offset = 0;
+    queue_row_count = 0;
+    queue_has_more = false;
+    queue_loading = false;
+    snprintf(queue_target, sizeof(queue_target), "%s", player_id);
+    queue_dirty = true;
+    queue_fetch_pending = true;
+}
+static void queue_back(lv_event_t *event) {
+    active_view = VIEW_NOW_PLAYING;
+    lv_scr_load(now_screen);
+}
+static void queue_play_clicked(lv_event_t *event) {
+    int index = (int)(intptr_t)lv_event_get_user_data(event) - 1;
+    if (index < 0 || !action_queue) return;
+    action_t action = {.type = ACT_QUEUE_PLAY, .queue_index = index};
+    snprintf(action.player_id, sizeof(action.player_id), "%s", queue_target);
+    if (xQueueSend(action_queue, &action, 0) != pdTRUE)
+        ESP_LOGW(TAG, "Queue action dropped");
+}
+static void queue_page_clicked(lv_event_t *event) {
+    action_type_t type = (action_type_t)(intptr_t)lv_event_get_user_data(event);
+    enqueue(type, NULL);
+}
+static void build_queue_view(void) {
+    if (!queue_list) return;
+    lv_obj_clean(queue_list);
+    if (queue_loading) {
+        lv_label_set_text(queue_status_label, "Loading queue...");
+    } else if (!ready) {
+        lv_label_set_text(queue_status_label, "Music Assistant disconnected");
+    } else if (!queue_row_count) {
+        lv_label_set_text(queue_status_label, "Queue is empty");
+    } else {
+        char caption[64];
+        snprintf(caption, sizeof(caption), "Tracks %d-%d", queue_offset + 1,
+                 queue_offset + (int)queue_row_count);
+        lv_label_set_text(queue_status_label, caption);
+        for (size_t i = 0; i < queue_row_count; ++i) {
+            char label[240];
+            snprintf(label, sizeof(label), "%s%s%s%s",
+                     queue_rows[i].index == queue_current_index ? "> " : "",
+                     queue_rows[i].title,
+                     queue_rows[i].artist[0] ? " - " : "",
+                     queue_rows[i].artist);
+            lv_obj_t *button = lv_list_add_btn(queue_list, NULL, label);
+            lv_obj_set_height(button, 62);
+            if (queue_rows[i].index == queue_current_index)
+                lv_obj_set_style_bg_color(button, lv_color_hex(0x315f91), 0);
+            lv_obj_add_event_cb(button, queue_play_clicked, LV_EVENT_CLICKED,
+                                (void *)(intptr_t)(queue_rows[i].index + 1));
+        }
+    }
+    if (queue_offset == 0 || queue_loading) lv_obj_add_state(queue_prev_button, LV_STATE_DISABLED);
+    else lv_obj_clear_state(queue_prev_button, LV_STATE_DISABLED);
+    if (!queue_has_more || queue_loading) lv_obj_add_state(queue_next_button, LV_STATE_DISABLED);
+    else lv_obj_clear_state(queue_next_button, LV_STATE_DISABLED);
+}
+
 static void init_screen(void) {
     now_screen = lv_scr_act();
     lv_obj_set_style_bg_color(now_screen, lv_color_hex(0x121c30), 0);
@@ -620,6 +816,13 @@ static void init_screen(void) {
     lv_obj_t *providers_text = lv_label_create(providers_button);
     lv_label_set_text(providers_text, "Providers");
     lv_obj_center(providers_text);
+    lv_obj_t *queue_button = lv_btn_create(now_screen);
+    lv_obj_set_size(queue_button, 170, 58);
+    lv_obj_align(queue_button, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_add_event_cb(queue_button, open_queue, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *queue_button_text = lv_label_create(queue_button);
+    lv_label_set_text(queue_button_text, "Queue");
+    lv_obj_center(queue_button_text);
     make_button(now_screen, "Prev", 116, 222, 125, ACT_PREVIOUS);
     play_button = make_button(now_screen, "Play", 250, 222, 125, ACT_PLAY_PAUSE);
     play_text = lv_obj_get_child(play_button, 0);
@@ -691,6 +894,31 @@ static void init_screen(void) {
     lv_obj_set_style_text_color(provider_save_status, lv_color_hex(0xa8c3e3), 0);
     lv_obj_align(provider_save_status, LV_ALIGN_BOTTOM_LEFT, 22, -32);
     lv_obj_set_flex_flow(providers_list, LV_FLEX_FLOW_COLUMN);
+    queue_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(queue_screen, lv_color_hex(0x121c30), 0);
+    lv_obj_set_style_bg_opa(queue_screen, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(queue_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *queue_heading = lv_label_create(queue_screen);
+    lv_label_set_text(queue_heading, "QUEUE");
+    lv_obj_set_style_text_font(queue_heading, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(queue_heading, lv_color_white(), 0);
+    lv_obj_align(queue_heading, LV_ALIGN_TOP_LEFT, 22, 20);
+    lv_obj_t *queue_back_button = lv_btn_create(queue_screen);
+    lv_obj_set_size(queue_back_button, 170, 55);
+    lv_obj_align(queue_back_button, LV_ALIGN_TOP_RIGHT, -20, 10);
+    lv_obj_add_event_cb(queue_back_button, queue_back, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *queue_back_label = lv_label_create(queue_back_button);
+    lv_label_set_text(queue_back_label, "Back");
+    lv_obj_center(queue_back_label);
+    queue_status_label = lv_label_create(queue_screen);
+    lv_obj_set_style_text_color(queue_status_label, lv_color_hex(0xa8c3e3), 0);
+    lv_obj_align(queue_status_label, LV_ALIGN_TOP_LEFT, 22, 75);
+    queue_list = lv_list_create(queue_screen);
+    lv_obj_set_size(queue_list, 755, 275);
+    lv_obj_align(queue_list, LV_ALIGN_TOP_MID, 0, 110);
+    queue_prev_button = make_button(queue_screen, "Previous page", 110, 400, 245, ACT_QUEUE_PREV_PAGE);
+    queue_next_button = make_button(queue_screen, "Next page", 445, 400, 245, ACT_QUEUE_NEXT_PAGE);
+    build_queue_view();
     update_now_playing();
 }
 void app_main(void) {
@@ -753,13 +981,17 @@ void app_main(void) {
                 status("Waiting for network time...");
             }
         }
+        if (ready && queue_fetch_pending && !queue_loading) {
+            queue_fetch_pending = false;
+            request_queue_page();
+        }
         if (ready && provider_fetch_pending) {
             provider_fetch_pending = false;
             request("providers", 'm');
         }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
-        if (screen_dirty || players_dirty || providers_dirty) { render(); screen_dirty = false; }
+        if (screen_dirty || players_dirty || providers_dirty || queue_dirty) { render(); screen_dirty = false; }
         int64_t now = esp_timer_get_time();
         if (ready && (refresh_pending || now - last_refresh >= 30000000LL)) {
             refresh_pending = false;
