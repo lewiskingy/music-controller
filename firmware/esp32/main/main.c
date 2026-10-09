@@ -11,6 +11,7 @@
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
@@ -547,6 +548,7 @@ static void provider_toggled(lv_event_t *event) {
     action_t action = {.type = ACT_PROVIDER_TOGGLE};
     snprintf(action.player_id, sizeof(action.player_id), "%s", id);
     action.selected = lv_obj_has_state(checkbox, LV_STATE_CHECKED);
+    ESP_LOGI(TAG, "Provider checkbox changed: selected=%d", (int)action.selected);
     if (xQueueSend(action_queue, &action, 0) != pdTRUE)
         ESP_LOGW(TAG, "Provider selection queue full");
 }
@@ -692,6 +694,7 @@ static void init_screen(void) {
     update_now_playing();
 }
 void app_main(void) {
+    ESP_LOGI(TAG, "Boot reset reason=%d", (int)esp_reset_reason());
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_touch_handle_t touch = NULL;
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
