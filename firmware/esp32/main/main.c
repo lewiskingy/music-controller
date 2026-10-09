@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
+#include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -39,6 +41,7 @@ typedef struct {
     bool playing;
     bool paused;
     bool available;
+    bool can_volume;
 } player_info_t;
 static player_info_t players[MAX_PLAYERS];
 static size_t player_count;
@@ -52,8 +55,8 @@ static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
 typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
-typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE } action_type_t;
-typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; } action_t;
+typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_VOLUME_SET, ACT_SEEK } action_type_t;
+typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; int position; char queue_id[129], item_id[129]; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
 static controller_ui_t ui;
 static lv_obj_t *now_screen;
@@ -61,9 +64,30 @@ static lv_obj_t *players_list, *providers_list, *provider_save_status;
 static volatile bool players_dirty = true;
 static int current_volume = 0;
 static bool current_playing, current_paused, current_available;
-static bool command_pending;
-static char pending_command_id[24];
-static int64_t command_started;
+typedef struct { bool pending; char id[24]; int64_t started; } pending_command_t;
+static pending_command_t commands[PLAYBACK_GROUPS];
+static action_t deferred_volume;
+static bool volume_deferred;
+static bool current_can_volume, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
+static char current_queue_id[129], current_item_id[129], album[160];
+static int track_duration;
+static double track_position, track_speed = 1.0;
+static bool queue_playing;
+static int64_t position_sample_time;
+static int action_group(action_type_t type) {
+    if (type == ACT_SEEK) return PLAYBACK_SEEK;
+    if (type == ACT_VOLUME_SET || type == ACT_VOLUME_UP || type == ACT_VOLUME_DOWN) return PLAYBACK_VOLUME;
+    return PLAYBACK_TRANSPORT;
+}
+static void clear_timeline(void) {
+    current_queue_id[0] = current_item_id[0] = album[0] = 0;
+    track_duration = 0; track_position = 0;
+    queue_active = queue_live = queue_allow_seek = queue_playing = false;
+}
+static bool can_seek(void) {
+    return playback_seek_allowed(track_duration, queue_live, queue_active, queue_allow_seek,
+                                 gateway_can_seek, current_queue_id[0] && current_item_id[0]);
+}
 static char provider_feedback[96] = "Tap checkboxes, then Save";
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
@@ -120,7 +144,7 @@ static void request(const char *command, char type) {
     if (sent < 0) ESP_LOGE(TAG, "Failed to send MA request %c", type);
 }
 
-static bool command_with_args(const char *command, const char *id, int volume, bool with_volume) {
+static bool command_with_args(const char *command, const char *id, int volume, bool with_volume, int group, int seek_position) {
     if (!ready || !esp_websocket_client_is_connected(socket_handle) || !id[0]) return false;
     cJSON *message = cJSON_CreateObject();
     cJSON *args = cJSON_CreateObject();
@@ -129,7 +153,8 @@ static bool command_with_args(const char *command, const char *id, int volume, b
     snprintf(message_id, sizeof(message_id), "c%u", ++request_id);
     cJSON_AddStringToObject(message, "message_id", message_id);
     cJSON_AddStringToObject(message, "command", command);
-    cJSON_AddStringToObject(args, "player_id", id);
+    cJSON_AddStringToObject(args, group == PLAYBACK_SEEK ? "queue_id" : "player_id", id);
+    if (group == PLAYBACK_SEEK) cJSON_AddNumberToObject(args, "position", seek_position);
     if (with_volume) cJSON_AddNumberToObject(args, "volume_level", volume);
     cJSON_AddItemToObject(message, "args", args);
     char *payload = cJSON_PrintUnformatted(message);
@@ -138,7 +163,7 @@ static bool command_with_args(const char *command, const char *id, int volume, b
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
             free(payload); cJSON_Delete(message); return false;
         }
-        snprintf(pending_command_id, sizeof(pending_command_id), "%s", message_id);
+        snprintf(commands[group].id, sizeof(commands[group].id), "%s", message_id);
         xSemaphoreGive(state_mutex);
         ESP_LOGI(TAG, "Sending player command: %s", command);
         sent = esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000)) == (int)strlen(payload);
@@ -147,10 +172,10 @@ static bool command_with_args(const char *command, const char *id, int volume, b
     cJSON_Delete(message);
     return sent;
 }
-static void finish_command(void) {
+static void finish_command(int group) {
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
-    command_pending = false;
-    pending_command_id[0] = 0;
+    commands[group].pending = false;
+    commands[group].id[0] = 0;
     screen_dirty = true;
     xSemaphoreGive(state_mutex);
 }
@@ -198,6 +223,7 @@ static void process_action(const action_t *action) {
             snprintf(player_id, sizeof(player_id), "%s", action->player_id);
             snprintf(track, sizeof(track), "Loading player...");
             artist[0] = 0;
+            clear_timeline();
             current_available = false;
             current_playing = false;
             snprintf(player_name, sizeof(player_name), "Loading player...");
@@ -208,15 +234,18 @@ static void process_action(const action_t *action) {
         if (found) { save_preferred_player(action->player_id); refresh_pending = true; }
         return;
     }
-    /* The action carries the player and values visible at the time of the tap.
-       Never retarget an already queued command when the room changes. */
+    int group = action_group(action->type);
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
-        finish_command(); return;
+        finish_command(group); return;
     }
-    bool allowed = ready && current_available && action->player_id[0] &&
-                   !strcmp(player_id, action->player_id);
+    bool allowed = ready && current_available &&
+        playback_target_matches(player_id, current_queue_id, current_item_id,
+                                action->player_id, action->queue_id, action->item_id, group == PLAYBACK_SEEK);
+    if (group == PLAYBACK_VOLUME) allowed = allowed && current_can_volume;
+    if (group == PLAYBACK_SEEK) allowed = allowed && can_seek() && !commands[PLAYBACK_TRANSPORT].pending;
+    int seek_position = playback_seek_position(action->position, track_duration);
     xSemaphoreGive(state_mutex);
-    if (!allowed) { status("Player unavailable or changed"); finish_command(); return; }
+    if (!allowed) { status("Control target unavailable or changed"); finish_command(group); return; }
     const char *command = NULL;
     int volume = action->volume;
     bool volume_command = false;
@@ -230,10 +259,15 @@ static void process_action(const action_t *action) {
         case ACT_VOLUME_UP:
             volume = playback_volume_step(volume, true);
             command = "players/cmd/volume_set"; volume_command = true; break;
-        default: finish_command(); return;
+        case ACT_VOLUME_SET:
+            volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
+            command = "players/cmd/volume_set"; volume_command = true; break;
+        case ACT_SEEK: command = "player_queues/seek"; break;
+        default: finish_command(group); return;
     }
-    if (!command_with_args(command, action->player_id, volume, volume_command)) {
-        status("Unable to send command"); finish_command();
+    const char *target = group == PLAYBACK_SEEK ? action->queue_id : action->player_id;
+    if (!command_with_args(command, target, volume, volume_command, group, seek_position)) {
+        status("Unable to send command"); finish_command(group);
     }
     refresh_pending = true;
 }
@@ -256,8 +290,15 @@ static void players_received(const cJSON *array) {
         field(info->id, sizeof(info->id), p, "player_id");
         field(info->name, sizeof(info->name), p, "name");
         field(info->provider, sizeof(info->provider), p, "provider");
+        const cJSON *features = cJSON_GetObjectItemCaseSensitive(p, "supported_features");
+        const cJSON *feature;
+        cJSON_ArrayForEach(feature, features) {
+            if (cJSON_IsString(feature) && !strcmp(feature->valuestring, "volume_set")) info->can_volume = true;
+        }
         const cJSON *volume = cJSON_GetObjectItemCaseSensitive(p, "volume_level");
         info->volume = cJSON_IsNumber(volume) ? volume->valueint : 0;
+        if (info->volume < 0) info->volume = 0;
+        if (info->volume > 100) info->volume = 100;
         const cJSON *play_state = cJSON_GetObjectItemCaseSensitive(p, "state");
         info->playing = cJSON_IsString(play_state) && strcmp(play_state->valuestring, "playing") == 0;
         info->paused = cJSON_IsString(play_state) && strcmp(play_state->valuestring, "paused") == 0;
@@ -279,11 +320,14 @@ static void players_received(const cJSON *array) {
         current_playing = chosen->playing;
         current_paused = chosen->paused;
         current_available = chosen->available;
+        current_can_volume = chosen->can_volume;
 
-        if (changed) { snprintf(track, sizeof(track), "Loading player..."); artist[0] = 0; }
+        if (changed) { clear_timeline(); snprintf(track, sizeof(track), "Loading player..."); artist[0] = 0; }
     } else {
         player_id[0] = 0;
         snprintf(player_name, sizeof(player_name), "No players");
+        clear_timeline();
+        current_can_volume = false;
         current_available = false;
         current_playing = false;
         snprintf(track, sizeof(track), "Nothing playing");
@@ -362,16 +406,43 @@ static void providers_received(const cJSON *array) {
     ESP_LOGI(TAG, "Music providers discovered: %u", (unsigned)music_provider_count);
 }
 
+static double number_or(const cJSON *obj, const char *key, double fallback) {
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return cJSON_IsNumber(value) && isfinite(value->valuedouble) ? value->valuedouble : fallback;
+}
 static void queues_received(const cJSON *array) {
     if (!cJSON_IsArray(array) || !state_mutex) return;
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    clear_timeline();
     const cJSON *queue;
     cJSON_ArrayForEach(queue, array) {
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(queue, "queue_id");
         if (!cJSON_IsString(id) || strcmp(id->valuestring, player_id)) continue;
+        field(current_queue_id, sizeof(current_queue_id), queue, "queue_id");
         const cJSON *item = cJSON_GetObjectItemCaseSensitive(queue, "current_item");
         const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
         if (!cJSON_IsObject(media)) media = item;
+        field(current_item_id, sizeof(current_item_id), item, "queue_item_id");
+        queue_active = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(queue, "active"));
+        const cJSON *queue_state = cJSON_GetObjectItemCaseSensitive(queue, "state");
+        queue_playing = cJSON_IsString(queue_state) && !strcmp(queue_state->valuestring, "playing");
+        double duration = number_or(item, "duration", number_or(media, "duration", 0));
+        track_duration = duration > 0 && duration <= 604800 ? (int)duration : 0;
+        const cJSON *type = cJSON_GetObjectItemCaseSensitive(media, "media_type");
+        const cJSON *details = cJSON_GetObjectItemCaseSensitive(item, "streamdetails");
+        if (!cJSON_IsString(type)) type = cJSON_GetObjectItemCaseSensitive(details, "media_type");
+        queue_live = cJSON_IsString(type) && (!strcmp(type->valuestring, "radio") || !strcmp(type->valuestring, "audio_source"));
+        queue_allow_seek = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(details, "allow_seek"));
+        track_position = number_or(queue, "elapsed_time", 0);
+        track_speed = number_or(queue, "playback_speed", 1.0);
+        if (track_speed <= 0 || track_speed > 4) track_speed = 1.0;
+        double updated = number_or(queue, "elapsed_time_last_updated", 0);
+        double now = (double)time(NULL);
+        if (queue_playing && updated > 0 && now >= updated && now - updated < 120)
+            track_position += (now - updated) * track_speed;
+        if (track_position < 0) track_position = 0;
+        if (track_duration > 0 && track_position > track_duration) track_position = track_duration;
+        position_sample_time = esp_timer_get_time();
         snprintf(track, sizeof(track), "Nothing playing");
         artist[0] = 0;
         if (cJSON_IsObject(media)) {
@@ -379,11 +450,11 @@ static void queues_received(const cJSON *array) {
             const cJSON *artists = cJSON_GetObjectItemCaseSensitive(media, "artists");
             const cJSON *first = cJSON_GetArrayItem(artists, 0);
             if (first) field(artist, sizeof(artist), first, "name");
+            field(album, sizeof(album), cJSON_GetObjectItemCaseSensitive(media, "album"), "name");
         }
-        screen_dirty = true;
-        xSemaphoreGive(state_mutex);
-        return;
+        break;
     }
+    screen_dirty = true;
     xSemaphoreGive(state_mutex);
 }
 static void handle_message(const char *payload, size_t len) {
@@ -393,8 +464,13 @@ static void handle_message(const char *payload, size_t len) {
     if (cJSON_IsString(event)) {
         ESP_LOGI(TAG, "Gateway event: %s", event->valuestring);
         if (!strcmp(event->valuestring, "gateway/ready")) {
+            const cJSON *caps = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "capabilities");
+            gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(caps, "seek"));
             ready = true; status("Connected"); refresh_pending = true;
             provider_fetch_pending = true;
+        } else if (!strcmp(event->valuestring, "gateway/capabilities")) {
+            gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "seek"));
+            screen_dirty = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
             ready = false; status("Gateway authentication failed");
         } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
@@ -404,13 +480,15 @@ static void handle_message(const char *payload, size_t len) {
     const cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "message_id");
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
     const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
+    if (!error || cJSON_IsNull(error) || cJSON_IsFalse(error)) error = cJSON_GetObjectItemCaseSensitive(msg, "error_code");
     if (cJSON_IsString(mid)) {
-        bool command_reply = false;
+        int reply_group = -1;
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) == pdTRUE) {
-            command_reply = pending_command_id[0] && !strcmp(mid->valuestring, pending_command_id);
+            for (int i = 0; i < PLAYBACK_GROUPS; ++i)
+                if (commands[i].pending && commands[i].id[0] && !strcmp(mid->valuestring, commands[i].id)) reply_group = i;
             xSemaphoreGive(state_mutex);
         }
-        if (command_reply) { finish_command(); refresh_pending = true; }
+        if (reply_group >= 0) { finish_command(reply_group); refresh_pending = true; }
         if (error && !cJSON_IsNull(error) && !cJSON_IsFalse(error)) {
             ESP_LOGE(TAG, "MA response %c returned error", mid->valuestring[0]);
             status("Music Assistant API error");
@@ -506,28 +584,45 @@ static bool load_config(void) {
     nvs_close(n);
     return ssid[0] && token[0] && !strncmp(url,"wss://",6);
 }
+static void queue_action(action_t *action) {
+    bool control = action->type != ACT_SELECT && action->type != ACT_PROVIDER_SAVE;
+    int group = action_group(action->type);
+    if (control && (!ready || !current_available || !player_id[0])) return;
+    if (control && commands[group].pending) {
+        /* Coalesce slider updates, including the final release, to the latest value. */
+        if (action->type == ACT_VOLUME_SET) { deferred_volume = *action; volume_deferred = true; }
+        return;
+    }
+    if (xQueueSend(action_queue, action, 0) == pdTRUE) {
+        if (control) {
+            commands[group].pending = true;
+            commands[group].started = esp_timer_get_time();
+        }
+        if (action->type == ACT_PROVIDER_SAVE)
+            snprintf(provider_feedback, sizeof(provider_feedback), "Saving selection...");
+        screen_dirty = true;
+    } else status("Action queue full; try again");
+}
 static void enqueue(action_type_t type, const char *id) {
     if (!action_queue || xSemaphoreTake(state_mutex, 0) != pdTRUE) return;
-    action_t action = {.type = type};
-    bool control = type != ACT_SELECT && type != ACT_PROVIDER_SAVE;
-    if (control && (command_pending || !ready || !current_available || !player_id[0])) {
-        xSemaphoreGive(state_mutex); return;
-    }
+    action_t action = {.type = type, .playing = current_playing, .volume = current_volume};
     snprintf(action.player_id, sizeof(action.player_id), "%s", id ? id : player_id);
-    action.playing = current_playing;
-    action.volume = current_volume;
-    if (xQueueSend(action_queue, &action, 0) == pdTRUE) {
-        if (control) { command_pending = true; command_started = esp_timer_get_time(); }
-        if (type == ACT_PROVIDER_SAVE) snprintf(provider_feedback, sizeof(provider_feedback), "Saving selection...");
-        screen_dirty = true;
-    } else { status("Action queue full; try again"); }
+    queue_action(&action);
     xSemaphoreGive(state_mutex);
 }
-static void dock_action(ui_action_t action) {
+static void dock_action(const ui_intent_t *intent) {
     static const action_type_t actions[] = {
-        ACT_PREVIOUS, ACT_PLAY_STOP, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP
+        ACT_PREVIOUS, ACT_PLAY_STOP, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_VOLUME_SET, ACT_SEEK
     };
-    enqueue(actions[action], NULL);
+    if (xSemaphoreTake(state_mutex, 0) != pdTRUE) return;
+    action_t action = {.type = actions[intent->type], .playing = current_playing,
+                       .volume = intent->type == UI_VOLUME_SET ? intent->value : current_volume,
+                       .position = intent->value};
+    snprintf(action.player_id, sizeof(action.player_id), "%s", intent->player_id);
+    snprintf(action.queue_id, sizeof(action.queue_id), "%s", intent->queue_id);
+    snprintf(action.item_id, sizeof(action.item_id), "%s", intent->item_id);
+    queue_action(&action);
+    xSemaphoreGive(state_mutex);
 }
 static void player_clicked(lv_event_t *event) {
     const char *id = lv_event_get_user_data(event);
@@ -545,10 +640,21 @@ static void back_clicked(lv_event_t *event) {
     controller_ui_show(&ui, UI_PLAYING);
 }
 static void update_now_playing(void) {
+    double position = track_position;
+    if (queue_playing && current_playing && ready)
+        position += ((esp_timer_get_time() - position_sample_time) / 1000000.0) * track_speed;
+    if (position < 0) position = 0;
+    if (track_duration > 0 && position > track_duration) position = track_duration;
+    if (position > 604800) position = 604800;
     ui_playback_t snapshot = {
-        .track = track, .artist = artist, .player = player_name, .status = state,
-        .volume = current_volume, .connected = ready, .available = current_available,
-        .playing = current_playing, .pending = command_pending
+        .track = track, .artist = artist, .album = album, .player = player_name, .status = state,
+        .player_id = player_id, .queue_id = current_queue_id, .item_id = current_item_id,
+        .volume = current_volume, .position = (int)position, .duration = track_duration,
+        .connected = ready, .available = current_available, .playing = current_playing,
+        .transport_pending = commands[PLAYBACK_TRANSPORT].pending,
+        .volume_pending = commands[PLAYBACK_VOLUME].pending,
+        .seek_pending = commands[PLAYBACK_SEEK].pending,
+        .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live
     };
     controller_ui_update(&ui, &snapshot);
     lv_label_set_text(provider_save_status, provider_feedback);
@@ -597,7 +703,7 @@ static void build_providers_view(void) {
     for (size_t i = 0; i < music_provider_count; ++i) {
         lv_obj_t *checkbox = lv_checkbox_create(providers_list);
         lv_checkbox_set_text(checkbox, music_providers[i].name);
-        lv_obj_set_width(checkbox, 432);
+        lv_obj_set_width(checkbox, 352);
         lv_obj_set_height(checkbox, 72);
         lv_obj_set_style_text_color(checkbox, lv_color_hex(0xf0f5ed), 0);
         if (music_providers[i].selected) lv_obj_add_state(checkbox, LV_STATE_CHECKED);
@@ -664,6 +770,7 @@ void app_main(void) {
     bool started = false;
     int64_t last_refresh = 0;
     int64_t last_heartbeat = 0;
+    int64_t last_position_render = 0;
     while (true) {
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
@@ -679,6 +786,14 @@ void app_main(void) {
             provider_fetch_pending = false;
             request("providers", 'm');
         }
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (volume_deferred && !commands[PLAYBACK_VOLUME].pending) {
+                action_t latest = deferred_volume;
+                volume_deferred = false;
+                if (ready && !strcmp(latest.player_id, player_id)) queue_action(&latest);
+            }
+            xSemaphoreGive(state_mutex);
+        }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
         if (screen_dirty || players_dirty || providers_dirty) {
@@ -686,12 +801,19 @@ void app_main(void) {
             if (!render()) screen_dirty = true;
         }
         int64_t now = esp_timer_get_time();
-        bool command_expired = false;
-        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-            command_expired = command_pending && (!ready || now - command_started > 10000000LL);
-            xSemaphoreGive(state_mutex);
+        for (int group = 0; group < PLAYBACK_GROUPS; ++group) {
+            bool expired = false;
+            if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                expired = commands[group].pending && (!ready || now - commands[group].started > 10000000LL);
+                if (!ready) volume_deferred = false;
+                xSemaphoreGive(state_mutex);
+            }
+            if (expired) { status("Command unconfirmed; refreshing"); finish_command(group); refresh_pending = true; }
         }
-        if (command_expired) { status("Command unconfirmed; refreshing"); finish_command(); refresh_pending = true; }
+        if (now - last_position_render >= 1000000LL) {
+            screen_dirty = true;
+            last_position_render = now;
+        }
         if (ready && (refresh_pending || now - last_refresh >= 30000000LL)) {
             refresh_pending = false;
             last_refresh = now;

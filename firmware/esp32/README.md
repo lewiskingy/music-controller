@@ -303,8 +303,8 @@ Physical orientation, touch alignment and available PSRAM still require
 validation on the actual board. Use a clean SDK configuration or set the same
 rotation choice in menuconfig when reusing an existing build directory.
 
-Volume intentionally retains the proven +/- controls with 5% stepping for
-this first increment; a drag slider is deferred. Navigation exposes only the
+This historical first increment retained +/- volume controls. The revised
+docks below supersede that geometry and add a vertical volume slider. Navigation exposes only the
 implemented Playing, Sources and Players views. Queue/Browse/Search and real
 artwork follow later; no placeholder navigation claims those features work.
 Provider multi-select and explicit Save retain existing behaviour.
@@ -331,3 +331,48 @@ your existing private NVS image at 0x9000 as described above. Verify:
 Skip/volume capability metadata is not yet modelled by the existing adapter;
 unsupported commands report gateway errors. Artwork decoding, full browsing
 and keyboard layout remain later increments.
+
+## Revised docks and seek timeline — design v1.1
+
+The current feature branch implements the revised shell from the design
+reference: 400×532 content at (0,64), persistent 80×532 VolumeDock at
+(400,64), full-width 480×136 TransportDock at (0,596), and navigation at
+y=732. Now Playing, Players and Providers share the same two dock instances.
+Both selection lists now fit the narrower pane.
+
+VolumeDock has a vertical 0–100% slider with a 48 px-wide touch target and
+56×56 +/- buttons retaining the existing 5% boundary stepping. Slider drag
+values are previews (marked ~), sent no more often than every 300 ms; the
+final release value is retained even while an earlier command is pending.
+Pending volume updates are coalesced to the latest value, never a backlog
+of obsolete intermediate positions. A * marks unconfirmed volume. Reported
+Music Assistant volume remains authoritative. Volume controls require the
+player's explicit `volume_set` capability.
+
+Now Playing adds album metadata and a seek timeline with elapsed/duration
+labels. Queue position is interpolated locally once a second while playing,
+using elapsed_time, its timestamp and playback_speed from queue snapshots.
+The UI freezes the gesture's player/queue/item identity, previews time locally
+and submits one `player_queues/seek` on release. Lost presses cancel; stale
+track/player gestures are rejected. Positions clamp within the current track,
+ending one second before duration to avoid advancing the queue.
+
+Seeking requires a finite duration up to seven days, active queue, stable
+queue item identity, non-live media, no explicit stream `allow_seek=false`,
+and gateway support. Live radio/audio sources show Live; unknown duration
+shows --:-- with a disabled timeline. Transport, volume and seek have separate
+acknowledgement/timeout slots, so seeking does not disable volume or browsing.
+A pending transport command disables seeking to avoid a skip/seek conflict.
+
+**Companion Atlas gateway deployment required for seek:** the gateway now
+allows integer-second `player_queues/seek` and advertises support through
+`gateway/capabilities` with `data.seek=true`. On an older gateway, transport
+and volume continue working and seeking remains disabled. No credentials or
+NVS changes are required. The installed MA version still needs device
+validation for active queue/stream fields and Sonos seek behaviour.
+
+Hardware acceptance: check both slider directions and enlarged hit targets,
+5% stepping at non-multiples (12→15 / 12→10), dragging volume during playback,
+seek preview/release on a finite track, track or room changes during dragging,
+radio/unknown-duration disabling, gateway failures/timeouts and reconnect.
+Real album artwork and remaining Queue/Browse/Search screens are still deferred.

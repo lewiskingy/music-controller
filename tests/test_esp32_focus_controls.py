@@ -18,10 +18,21 @@ def test_persist_selection_and_avoid_secrets():
     assert 'READ("device_token",token)' in SOURCE
 
 def test_commands_capture_player_and_recover_pending():
-    assert "command_with_args(command, action->player_id" in SOURCE
-    assert "!strcmp(player_id, action->player_id)" in SOURCE
-    assert "command_pending || !ready || !current_available" in SOURCE
-    assert "!strcmp(mid->valuestring, pending_command_id)" in SOURCE
-    assert "now - command_started > 10000000LL" in SOURCE
-    assert "finish_command()" in SOURCE
+    assert "playback_target_matches(player_id, current_queue_id, current_item_id" in SOURCE
+    assert "action->player_id, action->queue_id, action->item_id" in SOURCE
+    assert "command_with_args(command, target" in SOURCE
+    assert "!strcmp(mid->valuestring, commands[i].id)" in SOURCE
+    assert "now - commands[group].started > 10000000LL" in SOURCE
+    assert "finish_command(group)" in SOURCE
     assert "players/cmd/pause" not in SOURCE
+
+def test_side_volume_and_seek_timeline_use_separate_pending_states():
+    assert "panel(root, UI_VOLUME_X, UI_HEADER_HEIGHT" in UI
+    assert "UI_CONTENT_WIDTH, UI_CONTENT_HEIGHT" in UI
+    assert "volume_gesture" in UI and "seek_gesture" in UI
+    assert "LV_EVENT_RELEASED" in UI and "LV_EVENT_PRESS_LOST" in UI
+    assert "lv_tick_elaps(ui->last_volume_send) >= 300" in UI
+    assert "commands[PLAYBACK_SEEK].pending" in SOURCE
+    assert "commands[PLAYBACK_VOLUME].pending" in SOURCE
+    assert '"gateway/capabilities"' in SOURCE
+    assert '"player_queues/seek"' in SOURCE
