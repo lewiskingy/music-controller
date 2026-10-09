@@ -376,3 +376,35 @@ Hardware acceptance: check both slider directions and enlarged hit targets,
 seek preview/release on a finite track, track or room changes during dragging,
 radio/unknown-duration disabling, gateway failures/timeouts and reconnect.
 Real album artwork and remaining Queue/Browse/Search screens are still deferred.
+
+## Native LVGL acceptance screenshots
+
+The firmware CI `ui-acceptance` job builds the actual `controller_ui.c`
+against LVGL 8.3.11 on Linux. A headless display driver captures 480×800 RGB
+framebuffers; no HTML rendering, SDL, physical board or Music Assistant is
+required. A simulated LVGL pointer drives transport/navigation buttons and
+slider gestures. Deterministic fixtures cover all three implemented views,
+seek preview/pending, stopped, radio, long metadata, disconnected and
+unavailable states.
+
+Assertions check dock coordinates, transport order, minimum volume button
+size, non-scrolling shell, geometry containment outside intentionally
+scrolling lists, emitted intents, seek-on-release, stale gesture cancellation
+and disabled controls. Metadata labels have bounded heights to avoid
+expansion into adjacent controls. These are UI/component acceptance tests,
+not a complete gateway or hardware integration simulation.
+
+Each run uploads `music-controller-ui-screenshots-<commit>` with PNGs and
+`acceptance.log`, including screenshots already captured if a later check
+fails. No visual golden baseline is imposed yet. Physical rotation, GT911
+alignment, PSRAM and actual player behaviour remain hardware checks.
+
+Local execution with an LVGL v8.3.11 checkout:
+
+```bash
+cmake -S tests/native-ui -B build/native-ui -DLVGL_SOURCE_DIR=/absolute/path/to/lvgl
+cmake --build build/native-ui -j2
+mkdir -p artifacts/native-ui
+build/native-ui/ui_acceptance artifacts/native-ui
+python tests/native-ui/convert_screenshots.py artifacts/native-ui
+```

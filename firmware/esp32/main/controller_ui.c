@@ -27,6 +27,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_t *obj = lv_label_create(parent);
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_width(obj, w);
+    lv_obj_set_height(obj, large ? 30 : 24);
     lv_label_set_text(obj, text);
     lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
