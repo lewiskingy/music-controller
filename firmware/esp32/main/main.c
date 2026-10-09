@@ -275,9 +275,12 @@ static void save_music_providers(void) {
             status("Provider selection too large");
             return;
         }
-        strcat(value, "|");
-        strcat(value, music_providers[i].id);
-        strcat(value, "|");
+        size_t used = strlen(value);
+        int written = snprintf(value + used, sizeof(value) - used, "|%s|", music_providers[i].id);
+        if (written < 0 || (size_t)written >= sizeof(value) - used) {
+            status("Provider selection too large");
+            return;
+        }
     }
     nvs_handle_t n;
     if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) {
