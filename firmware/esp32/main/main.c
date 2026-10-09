@@ -76,6 +76,8 @@ static void reset_ws_message(void) {
     ws_expected = ws_received = 0;
 }
 
+static void save_music_providers(void);
+static void providers_received(const cJSON *array);
 static void build_players_view(void);
 static void build_providers_view(void);
 static void update_now_playing(void);
