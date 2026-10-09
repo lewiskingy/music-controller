@@ -253,6 +253,42 @@ existing private NVS image at `0x9000`. The first provider change is saved
 on-device and survives subsequent resets; re-flashing the full merged image
 and NVS resets the choice to the provisioned image's state.
 
+## Native Queue (full-screen focus)
+
+The **Queue** button on Now Playing opens a dedicated 800×480 Queue screen;
+it **replaces**, rather than overlays, Now Playing. Only the list scrolls.
+Back returns to Now Playing; the selected output player stays unchanged.
+
+The Queue screen requests `player_queues/items` from the authenticated Atlas
+gateway with the selected player's queue ID, a bounded page size of 30, and
+a page offset. Rows show title/artist and highlight the current queue index.
+Tapping a row sends `player_queues/play_index` with that queue ID and the
+absolute index. Previous/Next page controls move through longer queues.
+Empty, disconnected, loading and API-error states are surfaced. Queue
+state is cleared when the selected output player changes; responses for
+stale player/page requests are discarded.
+
+The Queue is **not** filtered by selected music providers: it reflects the
+selected player's actual playback queue, regardless of source. Browse and
+Search will later respect the provider checkbox selection.
+
+### Hardware acceptance
+
+- Open Queue from Now Playing; confirm no underlying Now Playing controls
+  remain visible and Back returns to Now Playing.
+- With an empty queue, confirm the empty state.
+- Populate a queue using Music Assistant; confirm titles and artist names.
+- Tap a queued track; confirm the correct item plays on the selected player.
+- Switch player and reopen Queue; confirm no stale tracks remain.
+- Test Previous/Next page with more than 30 tracks and current-track marking.
+- Disconnect/reconnect Wi-Fi; verify the view recovers.
+- Verify serial logs and no watchdog resets.
+
+After CI succeeds, flash the merged `music-controller-full-flash.bin` at
+`0x0`, then your **existing private** `controller-nvs.bin` at `0x9000`.
+No Atlas gateway changes are needed: both queue commands are already
+allowlisted. On-device testing is still required before marking complete.
+
 ## Provider checkbox reset investigation
 
 On hardware, the provider list loads but tapping a checkbox reportedly blanks
