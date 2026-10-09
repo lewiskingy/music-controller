@@ -271,3 +271,63 @@ visible, press Save, confirm the success label, return via Back, reopen and
 verify the selection; then press RESET and verify it persists. If the device
 reboots, capture the serial log including `Boot reset reason`, any panic
 backtrace and the final checkbox/save event. Avoid posting device tokens.
+
+## Rich portrait UI — first component increment
+
+The `feature/rich-portrait-ui` branch implements the first native LVGL design
+increment from `docs/design/music-controller-design.html`. It replaces the
+landscape screen compositions with one 480×800 shell: header (64 px), content
+(468 px), shared playback dock (200 px at y=532), navigation (68 px at y=732).
+Only content panes switch; the same dock objects remain mounted for Now
+Playing, Players and Providers. Lists scroll inside content.
+
+`controller_ui.c/.h` owns shared colours, sizing, labels, buttons, selection
+row styles, artwork placeholder and dock rendering. It has no network or NVS
+dependencies; the application passes a selected-player snapshot and receives
+action callbacks. `playback_policy.h` owns the host-testable Play/Stop and
+5% volume command policy.
+
+The centre control sends Stop while playing, Play otherwise, including paused
+players. There is no Pause or fourth Stop button. Commands capture the selected
+player and visible state at tap time, are queued off the LVGL task, and reject
+a changed/unavailable target rather than controlling a newly selected room.
+One pending command disables the dock until its correlated acknowledgement,
+send failure, disconnect or a 10-second timeout. Playback and volume remain
+authoritative Music Assistant state.
+
+The BSP's `CONFIG_LVGL_PORT_ROTATION_90=y` rotates rendering and GT911 touch
+coordinates together; no second application-level rotation is applied. The
+BSP 1.0.7 source exposes this option and uses three RGB framebuffers for
+rotation; allow roughly 2.2 MiB for those buffers before other allocations.
+Physical orientation, touch alignment and available PSRAM still require
+validation on the actual board. Use a clean SDK configuration or set the same
+rotation choice in menuconfig when reusing an existing build directory.
+
+Volume intentionally retains the proven +/- controls with 5% stepping for
+this first increment; a drag slider is deferred. Navigation exposes only the
+implemented Playing, Sources and Players views. Queue/Browse/Search and real
+artwork follow later; no placeholder navigation claims those features work.
+Provider multi-select and explicit Save retain existing behaviour.
+
+### Validation and device acceptance
+
+Run `python -m pytest tests/test_playback_policy.py tests/test_esp32_focus_controls.py
+tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py` for the
+command policy and integration contracts. CI builds against ESP-IDF 5.4.2 and
+LVGL 8.3.11. A passing build is not hardware acceptance.
+
+After CI succeeds, flash the workflow's merged image at 0x0, then restore
+your existing private NVS image at 0x9000 as described above. Verify:
+
+- Portrait layout and touch alignment at all four corners; no shell scrolling.
+- Real track/player metadata and identical dock position on all three views.
+- Previous, Play/Stop, Next and volume on each view; repeated taps do not
+  submit duplicate commands while pending.
+- Sonos Play after Stop (resume/restart semantics are provider-dependent).
+- Player changes, unavailable players, reconnects and rejected commands.
+- Provider checkbox/Save operation and persistence after RESET.
+- Stable memory, no resets, and responsive touch while gateway responses arrive.
+
+Skip/volume capability metadata is not yet modelled by the existing adapter;
+unsupported commands report gateway errors. Artwork decoding, full browsing
+and keyboard layout remain later increments.

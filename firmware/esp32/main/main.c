@@ -22,6 +22,8 @@
 #include "bsp/board.h"
 #include "bsp/lvgl_port.h"
 #include "lvgl.h"
+#include "controller_ui.h"
+#include "playback_policy.h"
 
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
@@ -50,16 +52,19 @@ static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
 typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
-typedef enum { ACT_SELECT, ACT_PLAY_PAUSE, ACT_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE } action_type_t;
-typedef struct { action_type_t type; char player_id[129]; bool selected; } action_t;
+typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE } action_type_t;
+typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
-static lv_obj_t *now_screen, *players_screen, *providers_screen;
-static lv_obj_t *title_label, *artist_label, *player_label, *state_label, *volume_label, *play_button, *play_text;
+static controller_ui_t ui;
+static lv_obj_t *now_screen;
 static lv_obj_t *players_list, *providers_list, *provider_save_status;
 static volatile bool players_dirty = true;
 static int current_volume = 0;
 static bool current_playing, current_paused, current_available;
-static bool current_sonos;
+static bool command_pending;
+static char pending_command_id[24];
+static int64_t command_started;
+static char provider_feedback[96] = "Tap checkboxes, then Save";
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
 static volatile bool ip_ready;
@@ -82,15 +87,18 @@ static void providers_received(const cJSON *array);
 static void build_players_view(void);
 static void build_providers_view(void);
 static void update_now_playing(void);
-static void render(void) {
-    if (!now_screen || !lvgl_port_lock(pdMS_TO_TICKS(250))) return;
+static bool render(void) {
+    if (!now_screen || !lvgl_port_lock(250)) return false;
+    bool rendered = false;
     if (state_mutex && xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         update_now_playing();
         if (players_dirty) { build_players_view(); players_dirty = false; }
         if (providers_dirty) { build_providers_view(); providers_dirty = false; }
         xSemaphoreGive(state_mutex);
+        rendered = true;
     }
     lvgl_port_unlock();
+    return rendered;
 }
 static void status(const char *s) {
     snprintf(state, sizeof(state), "%s", s);
@@ -112,11 +120,11 @@ static void request(const char *command, char type) {
     if (sent < 0) ESP_LOGE(TAG, "Failed to send MA request %c", type);
 }
 
-static void command_with_args(const char *command, const char *id, int volume, bool with_volume) {
-    if (!ready || !esp_websocket_client_is_connected(socket_handle) || !id[0]) return;
+static bool command_with_args(const char *command, const char *id, int volume, bool with_volume) {
+    if (!ready || !esp_websocket_client_is_connected(socket_handle) || !id[0]) return false;
     cJSON *message = cJSON_CreateObject();
     cJSON *args = cJSON_CreateObject();
-    if (!message || !args) { cJSON_Delete(message); cJSON_Delete(args); return; }
+    if (!message || !args) { cJSON_Delete(message); cJSON_Delete(args); return false; }
     char message_id[24];
     snprintf(message_id, sizeof(message_id), "c%u", ++request_id);
     cJSON_AddStringToObject(message, "message_id", message_id);
@@ -125,12 +133,26 @@ static void command_with_args(const char *command, const char *id, int volume, b
     if (with_volume) cJSON_AddNumberToObject(args, "volume_level", volume);
     cJSON_AddItemToObject(message, "args", args);
     char *payload = cJSON_PrintUnformatted(message);
+    bool sent = false;
     if (payload) {
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+            free(payload); cJSON_Delete(message); return false;
+        }
+        snprintf(pending_command_id, sizeof(pending_command_id), "%s", message_id);
+        xSemaphoreGive(state_mutex);
         ESP_LOGI(TAG, "Sending player command: %s", command);
-        esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000));
+        sent = esp_websocket_client_send_text(socket_handle, payload, strlen(payload), pdMS_TO_TICKS(1000)) == (int)strlen(payload);
         free(payload);
     }
     cJSON_Delete(message);
+    return sent;
+}
+static void finish_command(void) {
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    command_pending = false;
+    pending_command_id[0] = 0;
+    screen_dirty = true;
+    xSemaphoreGive(state_mutex);
 }
 static void save_preferred_player(const char *id) {
     nvs_handle_t n;
@@ -148,6 +170,7 @@ static void process_action(const action_t *action) {
     if (action->type == ACT_PROVIDER_SAVE) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         save_music_providers();
+        screen_dirty = true;
         xSemaphoreGive(state_mutex);
         return;
     }
@@ -169,12 +192,15 @@ static void process_action(const action_t *action) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         bool found = false;
         for (size_t i = 0; i < player_count; ++i)
-            if (!strcmp(players[i].id, action->player_id)) found = true;
+            if (!strcmp(players[i].id, action->player_id) && players[i].available) found = true;
         if (found) {
             snprintf(preferred, sizeof(preferred), "%s", action->player_id);
             snprintf(player_id, sizeof(player_id), "%s", action->player_id);
             snprintf(track, sizeof(track), "Loading player...");
             artist[0] = 0;
+            current_available = false;
+            current_playing = false;
+            snprintf(player_name, sizeof(player_name), "Loading player...");
             players_dirty = true;
             screen_dirty = true;
         }
@@ -182,33 +208,33 @@ static void process_action(const action_t *action) {
         if (found) { save_preferred_player(action->player_id); refresh_pending = true; }
         return;
     }
-    if (!ready || !current_available || !player_id[0]) {
-        status("Player unavailable");
-        return;
+    /* The action carries the player and values visible at the time of the tap.
+       Never retarget an already queued command when the room changes. */
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        finish_command(); return;
     }
+    bool allowed = ready && current_available && action->player_id[0] &&
+                   !strcmp(player_id, action->player_id);
+    xSemaphoreGive(state_mutex);
+    if (!allowed) { status("Player unavailable or changed"); finish_command(); return; }
     const char *command = NULL;
-    int volume = current_volume;
+    int volume = action->volume;
     bool volume_command = false;
     switch (action->type) {
-        case ACT_PLAY_PAUSE:
-            if (current_playing && current_sonos) {
-                status("Use Stop on Sonos");
-                return;
-            }
-            command = current_playing ? "players/cmd/pause" : "players/cmd/play";
-            break;
-        case ACT_STOP: command = "players/cmd/stop"; break;
+        case ACT_PLAY_STOP: command = playback_toggle_command(action->playing); break;
         case ACT_PREVIOUS: command = "players/cmd/previous"; break;
         case ACT_NEXT: command = "players/cmd/next"; break;
         case ACT_VOLUME_DOWN:
-            volume = volume <= 0 ? 0 : ((volume - 1) / 5) * 5;
+            volume = playback_volume_step(volume, false);
             command = "players/cmd/volume_set"; volume_command = true; break;
         case ACT_VOLUME_UP:
-            volume = volume >= 100 ? 100 : ((volume / 5) + 1) * 5;
+            volume = playback_volume_step(volume, true);
             command = "players/cmd/volume_set"; volume_command = true; break;
-        default: return;
+        default: finish_command(); return;
     }
-    command_with_args(command, player_id, volume, volume_command);
+    if (!command_with_args(command, action->player_id, volume, volume_command)) {
+        status("Unable to send command"); finish_command();
+    }
     refresh_pending = true;
 }
 
@@ -253,13 +279,15 @@ static void players_received(const cJSON *array) {
         current_playing = chosen->playing;
         current_paused = chosen->paused;
         current_available = chosen->available;
-        current_sonos = strstr(chosen->provider, "sonos") != NULL ||
-                        strstr(chosen->provider, "SONOS") != NULL;
+
         if (changed) { snprintf(track, sizeof(track), "Loading player..."); artist[0] = 0; }
     } else {
         player_id[0] = 0;
         snprintf(player_name, sizeof(player_name), "No players");
         current_available = false;
+        current_playing = false;
+        snprintf(track, sizeof(track), "Nothing playing");
+        artist[0] = 0;
     }
     players_dirty = true;
     screen_dirty = true;
@@ -274,6 +302,7 @@ static bool provider_is_selected(const char *id) {
     return strstr(selected_provider_ids, needle) != NULL;
 }
 static void save_music_providers(void) {
+    snprintf(provider_feedback, sizeof(provider_feedback), "Unable to save providers; try again");
     char value[PROVIDER_SELECTION_SIZE] = "";
     for (size_t i = 0; i < music_provider_count; ++i) {
         if (!music_providers[i].selected) continue;
@@ -302,10 +331,8 @@ static void save_music_providers(void) {
     snprintf(selected_provider_ids, sizeof(selected_provider_ids), "%s", value);
     provider_selection_saved = true;
     ESP_LOGI(TAG, "Music provider selection saved (%u bytes)", (unsigned)strlen(value));
-    if (provider_save_status && lvgl_port_lock(pdMS_TO_TICKS(250))) {
-        lv_label_set_text(provider_save_status, "Selection saved");
-        lvgl_port_unlock();
-    }
+    snprintf(provider_feedback, sizeof(provider_feedback), "Selection saved");
+    screen_dirty = true;
 }
 static void providers_received(const cJSON *array) {
     if (!cJSON_IsArray(array) || !state_mutex) {
@@ -378,6 +405,12 @@ static void handle_message(const char *payload, size_t len) {
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
     const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
     if (cJSON_IsString(mid)) {
+        bool command_reply = false;
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) == pdTRUE) {
+            command_reply = pending_command_id[0] && !strcmp(mid->valuestring, pending_command_id);
+            xSemaphoreGive(state_mutex);
+        }
+        if (command_reply) { finish_command(); refresh_pending = true; }
         if (error && !cJSON_IsNull(error) && !cJSON_IsFalse(error)) {
             ESP_LOGE(TAG, "MA response %c returned error", mid->valuestring[0]);
             status("Music Assistant API error");
@@ -474,55 +507,51 @@ static bool load_config(void) {
     return ssid[0] && token[0] && !strncmp(url,"wss://",6);
 }
 static void enqueue(action_type_t type, const char *id) {
-    if (!action_queue) return;
+    if (!action_queue || xSemaphoreTake(state_mutex, 0) != pdTRUE) return;
     action_t action = {.type = type};
-    if (id) snprintf(action.player_id, sizeof(action.player_id), "%s", id);
-    if (xQueueSend(action_queue, &action, 0) != pdTRUE) ESP_LOGW(TAG, "Action queue full");
+    bool control = type != ACT_SELECT && type != ACT_PROVIDER_SAVE;
+    if (control && (command_pending || !ready || !current_available || !player_id[0])) {
+        xSemaphoreGive(state_mutex); return;
+    }
+    snprintf(action.player_id, sizeof(action.player_id), "%s", id ? id : player_id);
+    action.playing = current_playing;
+    action.volume = current_volume;
+    if (xQueueSend(action_queue, &action, 0) == pdTRUE) {
+        if (control) { command_pending = true; command_started = esp_timer_get_time(); }
+        if (type == ACT_PROVIDER_SAVE) snprintf(provider_feedback, sizeof(provider_feedback), "Saving selection...");
+        screen_dirty = true;
+    } else { status("Action queue full; try again"); }
+    xSemaphoreGive(state_mutex);
 }
-static void control_clicked(lv_event_t *event) {
-    action_type_t type = (action_type_t)(intptr_t)lv_event_get_user_data(event);
-    enqueue(type, NULL);
+static void dock_action(ui_action_t action) {
+    static const action_type_t actions[] = {
+        ACT_PREVIOUS, ACT_PLAY_STOP, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP
+    };
+    enqueue(actions[action], NULL);
 }
 static void player_clicked(lv_event_t *event) {
     const char *id = lv_event_get_user_data(event);
     if (!id) return;
     enqueue(ACT_SELECT, id);
     active_view = VIEW_NOW_PLAYING;
-    lv_scr_load(now_screen);
+    controller_ui_show(&ui, UI_PLAYING);
 }
 static void open_players(lv_event_t *event) {
     active_view = VIEW_PLAYERS;
-    lv_scr_load(players_screen);
+    controller_ui_show(&ui, UI_PLAYERS);
 }
 static void back_clicked(lv_event_t *event) {
     active_view = VIEW_NOW_PLAYING;
-    lv_scr_load(now_screen);
-}
-static lv_obj_t *make_button(lv_obj_t *parent, const char *label,
-                             lv_coord_t x, lv_coord_t y, lv_coord_t w,
-                             action_type_t action) {
-    lv_obj_t *button = lv_btn_create(parent);
-    lv_obj_set_size(button, w, 60);
-    lv_obj_align(button, LV_ALIGN_TOP_LEFT, x, y);
-    lv_obj_add_event_cb(button, control_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)action);
-    lv_obj_t *text = lv_label_create(button);
-    lv_label_set_text(text, label);
-    lv_obj_center(text);
-    return button;
+    controller_ui_show(&ui, UI_PLAYING);
 }
 static void update_now_playing(void) {
-    lv_label_set_text(title_label, track);
-    lv_label_set_text(artist_label, artist);
-    lv_label_set_text(player_label, player_name);
-    lv_label_set_text(state_label, state);
-    char volume_text[40];
-    snprintf(volume_text, sizeof(volume_text), "Volume %d%%", current_volume);
-    lv_label_set_text(volume_label, volume_text);
-    lv_label_set_text(play_text, current_playing ? "Pause" : "Play");
-    // Sonos pause currently has a known queue-hopping issue. Use Stop instead.
-    if (!ready || !current_available || (current_sonos && current_playing))
-        lv_obj_add_state(play_button, LV_STATE_DISABLED);
-    else lv_obj_clear_state(play_button, LV_STATE_DISABLED);
+    ui_playback_t snapshot = {
+        .track = track, .artist = artist, .player = player_name, .status = state,
+        .volume = current_volume, .connected = ready, .available = current_available,
+        .playing = current_playing, .pending = command_pending
+    };
+    controller_ui_update(&ui, &snapshot);
+    lv_label_set_text(provider_save_status, provider_feedback);
 }
 static void build_players_view(void) {
     if (!players_list) return;
@@ -534,9 +563,7 @@ static void build_players_view(void) {
     }
     for (size_t i = 0; i < player_count; ++i) {
         lv_obj_t *button = lv_list_add_btn(players_list, NULL, players[i].name);
-        lv_obj_set_height(button, 56);
-        if (!strcmp(players[i].id, player_id))
-            lv_obj_set_style_bg_color(button, lv_color_hex(0x315f91), 0);
+        controller_ui_style_row(button, !strcmp(players[i].id, player_id), players[i].available);
         lv_obj_add_event_cb(button, player_clicked, LV_EVENT_CLICKED, players[i].id);
     }
 }
@@ -554,11 +581,10 @@ static void provider_toggled(lv_event_t *event) {
 }
 static void save_providers_clicked(lv_event_t *event) {
     enqueue(ACT_PROVIDER_SAVE, NULL);
-    if (provider_save_status) lv_label_set_text(provider_save_status, "Saving selection...");
 }
 static void open_providers(lv_event_t *event) {
     active_view = VIEW_PROVIDERS;
-    lv_scr_load(providers_screen);
+    controller_ui_show(&ui, UI_PROVIDERS);
 }
 static void build_providers_view(void) {
     if (!providers_list) return;
@@ -571,8 +597,9 @@ static void build_providers_view(void) {
     for (size_t i = 0; i < music_provider_count; ++i) {
         lv_obj_t *checkbox = lv_checkbox_create(providers_list);
         lv_checkbox_set_text(checkbox, music_providers[i].name);
-        lv_obj_set_width(checkbox, 690);
-        lv_obj_set_height(checkbox, 58);
+        lv_obj_set_width(checkbox, 432);
+        lv_obj_set_height(checkbox, 72);
+        lv_obj_set_style_text_color(checkbox, lv_color_hex(0xf0f5ed), 0);
         if (music_providers[i].selected) lv_obj_add_state(checkbox, LV_STATE_CHECKED);
         lv_obj_add_event_cb(checkbox, provider_toggled, LV_EVENT_VALUE_CHANGED, music_providers[i].id);
     }
@@ -580,139 +607,34 @@ static void build_providers_view(void) {
 
 static void init_screen(void) {
     now_screen = lv_scr_act();
-    lv_obj_set_style_bg_color(now_screen, lv_color_hex(0x121c30), 0);
-    lv_obj_set_style_bg_opa(now_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(now_screen, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *heading = lv_label_create(now_screen);
-    lv_label_set_text(heading, "NOW PLAYING");
-    lv_obj_set_style_text_color(heading, lv_color_hex(0xa8c3e3), 0);
-    lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 82);
-
-    lv_obj_t *player_button = lv_btn_create(now_screen);
-    lv_obj_set_size(player_button, 260, 58);
-    lv_obj_align(player_button, LV_ALIGN_TOP_RIGHT, -18, 8);
-    lv_obj_add_event_cb(player_button, open_players, LV_EVENT_CLICKED, NULL);
-    player_label = lv_label_create(player_button);
-    lv_label_set_text(player_label, player_name);
-    lv_label_set_long_mode(player_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(player_label, 225);
-    lv_obj_center(player_label);
-
-    title_label = lv_label_create(now_screen);
-    lv_obj_set_width(title_label, 750);
-    lv_label_set_long_mode(title_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 136);
-
-    artist_label = lv_label_create(now_screen);
-    lv_obj_set_width(artist_label, 740);
-    lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(artist_label, lv_color_hex(0xc0d1e8), 0);
-    lv_obj_align(artist_label, LV_ALIGN_TOP_MID, 0, 181);
-
-    lv_obj_t *providers_button = lv_btn_create(now_screen);
-    lv_obj_set_size(providers_button, 170, 58);
-    lv_obj_align(providers_button, LV_ALIGN_TOP_LEFT, 18, 8);
-    lv_obj_add_event_cb(providers_button, open_providers, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *providers_text = lv_label_create(providers_button);
-    lv_label_set_text(providers_text, "Providers");
-    lv_obj_center(providers_text);
-    make_button(now_screen, "Prev", 116, 222, 125, ACT_PREVIOUS);
-    play_button = make_button(now_screen, "Play", 250, 222, 125, ACT_PLAY_PAUSE);
-    play_text = lv_obj_get_child(play_button, 0);
-    make_button(now_screen, "Next", 384, 222, 125, ACT_NEXT);
-    make_button(now_screen, "Stop", 518, 222, 125, ACT_STOP);
-
-    make_button(now_screen, "-", 205, 313, 90, ACT_VOLUME_DOWN);
-    volume_label = lv_label_create(now_screen);
-    lv_obj_set_width(volume_label, 190);
-    lv_obj_set_style_text_align(volume_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(volume_label, LV_ALIGN_TOP_MID, 0, 330);
-    make_button(now_screen, "+", 505, 313, 90, ACT_VOLUME_UP);
-
-    state_label = lv_label_create(now_screen);
-    lv_obj_set_style_text_color(state_label, lv_color_hex(0x8fe3a0), 0);
-    lv_obj_align(state_label, LV_ALIGN_BOTTOM_MID, 0, -20);
-
-    players_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(players_screen, lv_color_hex(0x121c30), 0);
-    lv_obj_set_style_bg_opa(players_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(players_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *players_title = lv_label_create(players_screen);
-    lv_label_set_text(players_title, "SELECT PLAYER");
-    lv_obj_set_style_text_color(players_title, lv_color_white(), 0);
-    lv_obj_set_style_text_font(players_title, &lv_font_montserrat_24, 0);
-    lv_obj_align(players_title, LV_ALIGN_TOP_LEFT, 20, 24);
-    lv_obj_t *back = lv_btn_create(players_screen);
-    lv_obj_set_size(back, 190, 58);
-    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, -18, 10);
-    lv_obj_add_event_cb(back, back_clicked, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *back_text = lv_label_create(back);
-    lv_label_set_text(back_text, "Back");
-    lv_obj_center(back_text);
-    players_list = lv_list_create(players_screen);
-    lv_obj_set_size(players_list, 760, 365);
-    lv_obj_align(players_list, LV_ALIGN_BOTTOM_MID, 0, -10);
-    providers_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(providers_screen, lv_color_hex(0x121c30), 0);
-    lv_obj_set_style_bg_opa(providers_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(providers_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *provider_title = lv_label_create(providers_screen);
-    lv_label_set_text(provider_title, "MUSIC PROVIDERS");
-    lv_obj_set_style_text_color(provider_title, lv_color_white(), 0);
-    lv_obj_set_style_text_font(provider_title, &lv_font_montserrat_24, 0);
-    lv_obj_align(provider_title, LV_ALIGN_TOP_LEFT, 20, 24);
-    lv_obj_t *provider_back = lv_btn_create(providers_screen);
-    lv_obj_set_size(provider_back, 190, 58);
-    lv_obj_align(provider_back, LV_ALIGN_TOP_RIGHT, -18, 10);
-    lv_obj_add_event_cb(provider_back, back_clicked, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *provider_back_text = lv_label_create(provider_back);
-    lv_label_set_text(provider_back_text, "Back");
-    lv_obj_center(provider_back_text);
-    lv_obj_t *hint = lv_label_create(providers_screen);
-    lv_label_set_text(hint, "Choose sources for future Browse and Search");
-    lv_obj_set_style_text_color(hint, lv_color_hex(0xa8c3e3), 0);
-    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 20, 86);
-    providers_list = lv_obj_create(providers_screen);
-    lv_obj_set_size(providers_list, 760, 255);
-    lv_obj_align(providers_list, LV_ALIGN_TOP_MID, 0, 128);
-    lv_obj_t *save_button = lv_btn_create(providers_screen);
-    lv_obj_set_size(save_button, 200, 64);
-    lv_obj_align(save_button, LV_ALIGN_BOTTOM_RIGHT, -22, -12);
-    lv_obj_add_event_cb(save_button, save_providers_clicked, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *save_text = lv_label_create(save_button);
-    lv_label_set_text(save_text, "Save");
-    lv_obj_center(save_text);
-    provider_save_status = lv_label_create(providers_screen);
-    lv_label_set_text(provider_save_status, "Tap checkboxes, then Save");
-    lv_obj_set_style_text_color(provider_save_status, lv_color_hex(0xa8c3e3), 0);
-    lv_obj_align(provider_save_status, LV_ALIGN_BOTTOM_LEFT, 22, -32);
-    lv_obj_set_flex_flow(providers_list, LV_FLEX_FLOW_COLUMN);
+    controller_ui_create(&ui, now_screen, dock_action, open_players, open_providers,
+                         back_clicked, save_providers_clicked);
+    players_list = ui.players_list;
+    providers_list = ui.providers_list;
+    provider_save_status = ui.provider_feedback;
     update_now_playing();
 }
+
 void app_main(void) {
     ESP_LOGI(TAG, "Boot reset reason=%d", (int)esp_reset_reason());
+    state_mutex = xSemaphoreCreateMutex();
+    action_queue = xQueueCreate(12, sizeof(action_t));
+    ESP_ERROR_CHECK(state_mutex && action_queue ? ESP_OK : ESP_ERR_NO_MEM);
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_touch_handle_t touch = NULL;
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
     ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
-    if (lvgl_port_lock(pdMS_TO_TICKS(2000))) {
+    if (lvgl_port_lock(2000)) {
         init_screen();
         lv_obj_invalidate(lv_scr_act());
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
-    state_mutex = xSemaphoreCreateMutex();
-    action_queue = xQueueCreate(12, sizeof(action_t));
-    ESP_ERROR_CHECK(state_mutex && action_queue ? ESP_OK : ESP_ERR_NO_MEM);
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
-    if (!load_config()) { status("Provision device NVS first"); return; }
+    if (!load_config()) { status("Provision device NVS first"); render(); return; }
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -759,8 +681,17 @@ void app_main(void) {
         }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
-        if (screen_dirty || players_dirty || providers_dirty) { render(); screen_dirty = false; }
+        if (screen_dirty || players_dirty || providers_dirty) {
+            screen_dirty = false;
+            if (!render()) screen_dirty = true;
+        }
         int64_t now = esp_timer_get_time();
+        bool command_expired = false;
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            command_expired = command_pending && (!ready || now - command_started > 10000000LL);
+            xSemaphoreGive(state_mutex);
+        }
+        if (command_expired) { status("Command unconfirmed; refreshing"); finish_command(); refresh_pending = true; }
         if (ready && (refresh_pending || now - last_refresh >= 30000000LL)) {
             refresh_pending = false;
             last_refresh = now;
