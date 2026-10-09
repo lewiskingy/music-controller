@@ -311,7 +311,7 @@ static void providers_received(const cJSON *array) {
         field(provider->id, sizeof(provider->id), item, "instance_id");
         if (!provider->id[0]) continue;
         field(provider->name, sizeof(provider->name), item, "name");
-        if (!provider->name[0]) snprintf(provider->name, sizeof(provider->name), "%s", provider->id);
+        if (!provider->name[0]) memcpy(provider->name, provider->id, strlen(provider->id) + 1);
         provider->selected = provider_is_selected(provider->id);
         music_provider_count++;
     }
