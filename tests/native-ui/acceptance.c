@@ -73,6 +73,12 @@ static void no_clipping(lv_obj_t *object,bool inside_scroll) {
     bool scroll = inside_scroll || lv_obj_has_flag(object,LV_OBJ_FLAG_SCROLLABLE);
     for (unsigned i=0;i<lv_obj_get_child_cnt(object);++i) no_clipping(lv_obj_get_child(object,i),scroll);
 }
+static void fixed_caption(lv_obj_t *obj) {
+    const lv_font_t *font=lv_obj_get_style_text_font(obj,LV_PART_MAIN);
+    lv_point_t size;
+    lv_txt_get_size(&size,lv_label_get_text(obj),font,0,0,1000,LV_TEXT_FLAG_NONE);
+    CHECK(size.x<=lv_obj_get_width(obj) && size.y<=lv_obj_get_height(obj));
+}
 static void geometry(void) {
     advance(50);
     lv_area_t dock = bounds(lv_obj_get_parent(ui.transport[0]));
@@ -84,6 +90,15 @@ static void geometry(void) {
     CHECK(lv_obj_get_width(ui.volume_up)>=48 && lv_obj_get_height(ui.volume_up)>=48);
     CHECK(lv_obj_get_width(ui.volume_down)>=48 && lv_obj_get_height(ui.volume_down)>=48);
     CHECK(!lv_obj_has_flag(ui.root,LV_OBJ_FLAG_SCROLLABLE));
+    const char *tabs[]={"Playing","Queue","Browse","Search"};
+    for(unsigned i=0;i<4;i++) {
+        lv_obj_t *caption=lv_obj_get_child(ui.navigation[i],0);
+        CHECK(!strcmp(lv_label_get_text(caption),tabs[i])); fixed_caption(caption);
+        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i!=0));
+        lv_area_t tab=bounds(ui.navigation[i]);
+        CHECK(tab.x1==8+(int)i*118 && tab.y1==742);
+    }
+    fixed_caption(ui.volume_heading); fixed_caption(ui.heading);
     no_clipping(ui.root,false);
 }
 int main(int argc,char **argv) {
@@ -103,7 +118,7 @@ int main(int argc,char **argv) {
     const char *sources[]={"Navidrome","Spotify","BBC Sounds"};
     for(unsigned i=0;i<3;i++) {
         lv_obj_t *row=lv_checkbox_create(ui.providers_list);
-        lv_checkbox_set_text(row,sources[i]); lv_obj_set_size(row,352,72);
+        controller_ui_style_source(row); lv_checkbox_set_text(row,sources[i]); lv_obj_set_size(row,352,72);
         if(i==0) lv_obj_add_state(row,LV_STATE_CHECKED);
     }
     ui_playback_t state={.track="Daydreamer",.artist="Adele",.album="19",.player="Extension",
@@ -117,9 +132,9 @@ int main(int argc,char **argv) {
     CHECK(!strcmp(last_intent.player_id,"room-a"));
     click(ui.volume_up); CHECK(last_intent.type==UI_VOLUME_UP);
     click(ui.volume_down); CHECK(last_intent.type==UI_VOLUME_DOWN);
-    click(ui.navigation[2]); CHECK(!lv_obj_has_flag(ui.players_content,LV_OBJ_FLAG_HIDDEN));
+    click(ui.player_button); CHECK(!lv_obj_has_flag(ui.players_content,LV_OBJ_FLAG_HIDDEN));
     screenshot("02-players"); geometry();
-    click(ui.navigation[1]); CHECK(!lv_obj_has_flag(ui.providers_content,LV_OBJ_FLAG_HIDDEN));
+    click(ui.settings_button); click(ui.sources_button); CHECK(!lv_obj_has_flag(ui.providers_content,LV_OBJ_FLAG_HIDDEN));
     screenshot("03-providers"); geometry(); click(ui.save_button);
     CHECK(!strcmp(lv_label_get_text(ui.provider_feedback),"Selection saved"));
     click(ui.navigation[0]); CHECK(!lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
@@ -154,6 +169,32 @@ int main(int argc,char **argv) {
     screenshot("09-disconnected"); geometry();
     state.connected=true; state.available=false; controller_ui_update(&ui,&state);
     CHECK(lv_obj_has_state(ui.volume_slider,LV_STATE_DISABLED)); screenshot("10-unavailable"); geometry();
-    printf("PASS: %u layout and interaction checks; 10 screenshots at 480x800\n",checks);
+    state.track="Daydreamer"; state.artist="Adele"; state.album="19";
+    state.available=true; state.can_seek=true; state.duration=220; state.playing=true;
+    state.status="Connected"; controller_ui_update(&ui,&state);
+    const char *themes[]={"green","blue","red","orange","purple","grey"};
+    for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
+        click(ui.settings_button); click(ui.palette_buttons[p]); click(ui.mode_buttons[mode]);
+        CHECK(ui.palette==p && ui.light==(bool)mode);
+        CHECK(lv_obj_has_state(ui.palette_buttons[p],LV_STATE_CHECKED));
+        CHECK(lv_obj_has_state(ui.mode_buttons[mode],LV_STATE_CHECKED));
+        geometry();
+        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-settings",themes[p],mode?"light":"dark");
+        screenshot(name);
+        click(ui.navigation[0]); geometry();
+        CHECK(lv_color_to32(lv_obj_get_style_bg_color(ui.timeline,LV_PART_INDICATOR))==
+              lv_color_to32(lv_obj_get_style_bg_color(ui.transport[1],LV_PART_MAIN)));
+        snprintf(name,sizeof(name),"theme-%s-%s-playing",themes[p],mode?"light":"dark");
+        screenshot(name);
+        unsigned count=intent_count;
+        for(unsigned i=1;i<4;i++) click(ui.navigation[i]);
+        CHECK(intent_count==count && !lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
+        click(ui.player_button); geometry();
+        snprintf(name,sizeof(name),"theme-%s-%s-players",themes[p],mode?"light":"dark"); screenshot(name);
+        click(ui.settings_button); click(ui.sources_button); geometry();
+        snprintf(name,sizeof(name),"theme-%s-%s-sources",themes[p],mode?"light":"dark"); screenshot(name);
+    }
+    controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
+    printf("PASS: %u layout and interaction checks; 58 screenshots at 480x800\n",checks);
     return 0;
 }

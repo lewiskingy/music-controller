@@ -408,3 +408,11 @@ mkdir -p artifacts/native-ui
 build/native-ui/ui_acceptance artifacts/native-ui
 python tests/native-ui/convert_screenshots.py artifacts/native-ui
 ```
+
+### Appearance and staged navigation
+
+The header cog opens appearance settings. Six palettes (Green, Blue, Red, Orange, Purple, Grey) each support Dark and Light modes. Shared semantic LVGL styles apply to existing controls and newly created player/source rows. Selection is stored as `ui_palette` and `ui_light` in the `controller` NVS namespace and restored on boot. Invalid palette values fall back to Green.
+
+The bottom tabs match the design: Playing, Queue, Browse, Search. The last three are visible but disabled while their functionality is developed. Use the header player selector for Players and Settings → Music sources for provider selection.
+
+Native acceptance captures 58 screenshots: ten playback/interaction states plus Playing, Settings, Players and Music Sources in each of the twelve themes. Checks include fixed caption fit (including the volume heading), tab positions/order and disabled interaction, persistent dock geometry and containment.

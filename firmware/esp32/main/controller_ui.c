@@ -2,13 +2,71 @@
 #include <string.h>
 #include "controller_ui.h"
 
-#define BG 0x101b19
-#define SURFACE 0x162620
-#define CARD 0x243a30
-#define ACTIVE 0x273e30
-#define TEXT 0xf0f5ed
-#define MUTED 0xaabbb0
-#define ACCENT 0xc1d7a5
+/* Semantic colours are shared styles, so new and existing controls update together. */
+enum { BG, SURFACE, CARD, ACTIVE, TEXT, MUTED, ACCENT, ROLE_COUNT };
+static lv_style_t backgrounds[ROLE_COUNT], foregrounds[ROLE_COUNT];
+static bool styles_ready;
+static const char *palette_names[] = {"Green", "Blue", "Red", "Orange", "Purple", "Grey"};
+static const unsigned palettes[6][2][ROLE_COUNT] = {
+ {{0x101b19,0x162620,0x243a30,0x273e30,0xf0f5ed,0xaabbb0,0xc1d7a5},
+  {0xf3f7f1,0xe4ece0,0xd7e4d0,0xc8ddbc,0x172517,0x4b6048,0x385d28}},
+ {{0x101923,0x172634,0x243a50,0x294563,0xf0f5fb,0xaabacd,0xa5c9ef},
+  {0xf1f6fb,0xe0eaf4,0xd0dfee,0xbcd6ee,0x172535,0x485e73,0x245b8e}},
+ {{0x211315,0x301d20,0x492b30,0x563037,0xfbf1f1,0xc6afb2,0xefafb7},
+  {0xfbf3f3,0xf2e2e3,0xebd2d5,0xe5bfc5,0x35171c,0x754b53,0x943747}},
+ {{0x211810,0x302419,0x493525,0x563d29,0xfbf5ed,0xc6b6a5,0xefc295},
+  {0xfbf6f0,0xf2e8db,0xebddca,0xe5cfb1,0x352517,0x72583c,0x87501b}},
+ {{0x1b1423,0x281e34,0x3c2c4d,0x473359,0xf8f1fb,0xbcafca,0xd5b0ed},
+  {0xf8f3fb,0xeee2f4,0xe4d3ed,0xdac1e6,0x2c1938,0x654d77,0x71428f}},
+ {{0x171717,0x242424,0x353535,0x414141,0xf4f4f4,0xb7b7b7,0xd4d4d4},
+  {0xf6f6f6,0xe7e7e7,0xd8d8d8,0xc8c8c8,0x202020,0x585858,0x444444}}
+};
+static void bg(lv_obj_t *obj, unsigned role, lv_style_selector_t selector) {
+    lv_obj_add_style(obj, &backgrounds[role], selector);
+}
+static void fg(lv_obj_t *obj, unsigned role, lv_style_selector_t selector) {
+    lv_obj_add_style(obj, &foregrounds[role], selector);
+}
+void controller_ui_set_theme(controller_ui_t *ui, unsigned palette, bool light) {
+    if (palette >= 6) palette = 0;
+    if (!styles_ready) {
+        for (unsigned i=0;i<ROLE_COUNT;i++) {
+            lv_style_init(&backgrounds[i]); lv_style_init(&foregrounds[i]);
+        }
+        styles_ready = true;
+    }
+    ui->palette = palette; ui->light = light;
+    for (unsigned i=0;i<ROLE_COUNT;i++) {
+        lv_style_set_bg_color(&backgrounds[i], lv_color_hex(palettes[palette][light][i]));
+        lv_style_set_text_color(&foregrounds[i], lv_color_hex(palettes[palette][light][i]));
+        lv_obj_report_style_change(&backgrounds[i]); lv_obj_report_style_change(&foregrounds[i]);
+    }
+    for (unsigned i=0;i<6;i++) if (ui->palette_buttons[i]) {
+        if (i==palette) lv_obj_add_state(ui->palette_buttons[i],LV_STATE_CHECKED);
+        else lv_obj_clear_state(ui->palette_buttons[i],LV_STATE_CHECKED);
+    }
+    for (unsigned i=0;i<2;i++) if (ui->mode_buttons[i]) {
+        if (i==(unsigned)light) lv_obj_add_state(ui->mode_buttons[i],LV_STATE_CHECKED);
+        else lv_obj_clear_state(ui->mode_buttons[i],LV_STATE_CHECKED);
+    }
+}
+void controller_ui_style_source(lv_obj_t *obj) {
+    fg(obj,TEXT,0); bg(obj,CARD,LV_PART_INDICATOR);
+    bg(obj,ACCENT,LV_PART_INDICATOR | LV_STATE_CHECKED);
+}
+static void settings_clicked(lv_event_t *event) {
+    controller_ui_t *ui = lv_event_get_user_data(event);
+    controller_ui_show(ui, UI_SETTINGS);
+}
+static void theme_clicked(lv_event_t *event) {
+    controller_ui_t *ui = lv_event_get_user_data(event);
+    lv_obj_t *target = lv_event_get_target(event);
+    unsigned palette=ui->palette; bool light=ui->light;
+    for (unsigned i=0;i<6;i++) if(target==ui->palette_buttons[i]) palette=i;
+    for (unsigned i=0;i<2;i++) if(target==ui->mode_buttons[i]) light=i;
+    controller_ui_set_theme(ui,palette,light);
+    if(ui->theme_cb) ui->theme_cb(palette,light);
+}
 
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned color) {
     lv_obj_t *obj = lv_obj_create(parent);
@@ -17,7 +75,7 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned co
     lv_obj_set_style_pad_all(obj, 0, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     lv_obj_set_style_radius(obj, 0, 0);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(color), 0);
+    bg(obj, color, 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
@@ -30,7 +88,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_set_height(obj, large ? 30 : 24);
     lv_label_set_text(obj, text);
     lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+    fg(obj, color, 0);
     if (large) lv_obj_set_style_text_font(obj, &lv_font_montserrat_24, 0);
     return obj;
 }
@@ -39,11 +97,12 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_t *obj = lv_btn_create(parent);
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_size(obj, w, h);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(CARD), 0);
-    lv_obj_set_style_text_color(obj, lv_color_hex(TEXT), 0);
+    bg(obj, CARD, 0);
+    fg(obj, TEXT, 0);
     lv_obj_set_style_radius(obj, 12, 0);
     lv_obj_set_style_shadow_width(obj, 0, 0);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(ACTIVE), LV_STATE_PRESSED);
+    bg(obj, ACTIVE, LV_STATE_PRESSED);
+    bg(obj, CARD, LV_STATE_DISABLED);
     lv_obj_set_style_opa(obj, LV_OPA_40, LV_STATE_DISABLED);
     if (cb) lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, data);
     lv_obj_t *caption = lv_label_create(obj);
@@ -107,9 +166,9 @@ static lv_obj_t *slider(lv_obj_t *parent, int x, int y, int w, int h, controller
     lv_obj_t *obj = lv_slider_create(parent);
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_size(obj, w, h);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(CARD), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(ACCENT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(ACCENT), LV_PART_KNOB);
+    bg(obj, CARD, LV_PART_MAIN);
+    bg(obj, ACCENT, LV_PART_INDICATOR);
+    bg(obj, ACCENT, LV_PART_KNOB);
     lv_obj_set_style_pad_all(obj, 8, LV_PART_KNOB);
     lv_obj_set_style_opa(obj, LV_OPA_40, LV_STATE_DISABLED);
     /* Extend hit targets without making the visible rails thick. */
@@ -119,8 +178,8 @@ static lv_obj_t *slider(lv_obj_t *parent, int x, int y, int w, int h, controller
 }
 void controller_ui_style_row(lv_obj_t *row, bool selected, bool available) {
     lv_obj_set_height(row, 72);
-    lv_obj_set_style_bg_color(row, lv_color_hex(selected ? ACTIVE : SURFACE), 0);
-    lv_obj_set_style_text_color(row, lv_color_hex(TEXT), 0);
+    bg(row, selected ? ACTIVE : SURFACE, 0);
+    fg(row, TEXT, 0);
     lv_obj_set_style_radius(row, 10, 0);
     if (!available) lv_obj_add_state(row, LV_STATE_DISABLED);
 }
@@ -130,13 +189,16 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     memset(ui, 0, sizeof(*ui));
     ui->root = root;
     ui->action_cb = action_cb;
-    lv_obj_set_style_bg_color(root, lv_color_hex(BG), 0);
-    lv_obj_set_style_text_color(root, lv_color_hex(TEXT), 0);
+    controller_ui_set_theme(ui,0,false);
+    bg(root, BG, 0);
+    fg(root, TEXT, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *header = panel(root, 0, 0, UI_WIDTH, UI_HEADER_HEIGHT, BG);
-    ui->heading = label(header, "Now Playing", 24, 22, 180, TEXT, false);
-    lv_obj_t *player_button = button(header, "", 216, 8, 240, 48, players_cb, NULL);
+    ui->heading = label(header, "Now Playing", 68, 22, 142, TEXT, false);
+    ui->settings_button = button(header, LV_SYMBOL_SETTINGS, 8, 8, 48, 48, settings_clicked, ui);
+    ui->player_button = button(header, "", 224, 8, 248, 48, players_cb, NULL);
+    lv_obj_t *player_button = ui->player_button;
     ui->player_text = lv_obj_get_child(player_button, 0);
     lv_obj_set_width(ui->player_text, 210);
     lv_label_set_long_mode(ui->player_text, LV_LABEL_LONG_DOT);
@@ -164,9 +226,9 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->players_list = lv_list_create(ui->players_content);
     lv_obj_set_pos(ui->players_list, 24, 60);
     lv_obj_set_size(ui->players_list, 352, 448);
-    lv_obj_set_style_bg_color(ui->players_list, lv_color_hex(BG), 0);
+    bg(ui->players_list, BG, 0);
     lv_obj_set_style_border_width(ui->players_list, 0, 0);
-    label(ui->providers_content, "Choose sources for future Browse and Search", 24, 20, 352, MUTED, false);
+    label(ui->providers_content, "Choose music sources", 24, 20, 352, MUTED, false);
     ui->providers_list = panel(ui->providers_content, 24, 60, 352, 364, BG);
     lv_obj_add_flag(ui->providers_list, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(ui->providers_list, LV_FLEX_FLOW_COLUMN);
@@ -181,12 +243,13 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->transport[1] = button(dock, LV_SYMBOL_PLAY, 204, 60, 72, 72, dock_clicked, ui);
     ui->transport[2] = button(dock, LV_SYMBOL_NEXT, 308, 68, 64, 56, dock_clicked, ui);
     lv_obj_set_style_radius(ui->transport[1], 36, 0);
-    lv_obj_set_style_bg_color(ui->transport[1], lv_color_hex(ACCENT), 0);
-    lv_obj_set_style_text_color(ui->transport[1], lv_color_hex(BG), 0);
+    bg(ui->transport[1], ACCENT, 0);
+    fg(ui->transport[1], BG, 0);
     ui->transport_text = lv_obj_get_child(ui->transport[1], 0);
     lv_obj_t *volume_dock = panel(root, UI_VOLUME_X, UI_HEADER_HEIGHT,
                                   UI_VOLUME_WIDTH, UI_CONTENT_HEIGHT, SURFACE);
-    label(volume_dock, "VOLUME", 8, 20, 64, MUTED, false);
+    ui->volume_heading = label(volume_dock, "Vol", 8, 20, 64, MUTED, false);
+    lv_obj_set_style_text_align(ui->volume_heading, LV_TEXT_ALIGN_CENTER, 0);
     ui->volume_up = button(volume_dock, "+", 12, 54, 56, 56, dock_clicked, ui);
     ui->volume_slider = slider(volume_dock, 37, 136, 6, 236, ui);
     lv_slider_set_range(ui->volume_slider, 0, 100);
@@ -194,22 +257,42 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_set_style_text_align(ui->volume, LV_TEXT_ALIGN_CENTER, 0);
     ui->volume_down = button(volume_dock, "-", 12, 432, 56, 56, dock_clicked, ui);
     lv_obj_t *nav = panel(root, 0, UI_NAV_Y, UI_WIDTH, UI_NAV_HEIGHT, BG);
-    ui->navigation[0] = button(nav, "Playing", 12, 10, 144, 48, back_cb, NULL);
-    ui->navigation[1] = button(nav, "Sources", 168, 10, 144, 48, providers_cb, NULL);
-    ui->navigation[2] = button(nav, "Players", 324, 10, 144, 48, players_cb, NULL);
+    const char *tabs[] = {"Playing", "Queue", "Browse", "Search"};
+    for (unsigned i=0;i<4;i++) {
+        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:NULL,NULL);
+        if(i) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
+    }
+    ui->settings_content = panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
+    label(ui->settings_content,"Colour palette",24,20,352,TEXT,true);
+    for(unsigned i=0;i<6;i++) {
+        ui->palette_buttons[i]=button(ui->settings_content,palette_names[i],24+(i%2)*180,
+                                      68+(i/2)*68,172,56,theme_clicked,ui);
+        bg(ui->palette_buttons[i],ACCENT,LV_STATE_CHECKED);
+        fg(ui->palette_buttons[i],BG,LV_STATE_CHECKED);
+    }
+    label(ui->settings_content,"Appearance",24,278,352,TEXT,true);
+    for(unsigned i=0;i<2;i++) {
+        ui->mode_buttons[i]=button(ui->settings_content,i?"Light":"Dark",24+i*180,320,172,56,theme_clicked,ui);
+        bg(ui->mode_buttons[i],ACCENT,LV_STATE_CHECKED);
+        fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
+    }
+    ui->sources_button=button(ui->settings_content,"Music sources",24,414,352,56,providers_cb,NULL);
+    controller_ui_set_theme(ui,0,false);
     controller_ui_show(ui, UI_PLAYING);
 }
 void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
-    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content};
-    for (unsigned i = 0; i < 3; ++i) {
+    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content};
+    for (unsigned i = 0; i < 4; ++i) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
     }
-    const char *titles[] = {"Now Playing", "Players", "Providers"};
+    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings"};
     lv_label_set_text(ui->heading, titles[view]);
-    unsigned active = view == UI_PLAYING ? 0 : (view == UI_PROVIDERS ? 1 : 2);
-    for (unsigned i = 0; i < 3; ++i)
-        lv_obj_set_style_bg_color(ui->navigation[i], lv_color_hex(i == active ? ACTIVE : BG), 0);
+    for (unsigned i = 0; i < 4; ++i) {
+        lv_obj_remove_style(ui->navigation[i], &backgrounds[ACTIVE], 0);
+        lv_obj_remove_style(ui->navigation[i], &backgrounds[BG], 0);
+        bg(ui->navigation[i], i == 0 && view == UI_PLAYING ? ACTIVE : BG, 0);
+    }
 }
 static void enabled(lv_obj_t *obj, bool value) {
     if (value) lv_obj_clear_state(obj, LV_STATE_DISABLED);

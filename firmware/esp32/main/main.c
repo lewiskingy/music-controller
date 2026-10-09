@@ -705,16 +705,35 @@ static void build_providers_view(void) {
         lv_checkbox_set_text(checkbox, music_providers[i].name);
         lv_obj_set_width(checkbox, 352);
         lv_obj_set_height(checkbox, 72);
-        lv_obj_set_style_text_color(checkbox, lv_color_hex(0xf0f5ed), 0);
+        controller_ui_style_source(checkbox);
         if (music_providers[i].selected) lv_obj_add_state(checkbox, LV_STATE_CHECKED);
         lv_obj_add_event_cb(checkbox, provider_toggled, LV_EVENT_VALUE_CHANGED, music_providers[i].id);
     }
+}
+
+static void save_theme(unsigned palette, bool light) {
+    nvs_handle_t n;
+    if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) return;
+    esp_err_t err = nvs_set_u8(n, "ui_palette", palette);
+    if (err == ESP_OK) err = nvs_set_u8(n, "ui_light", light);
+    if (err == ESP_OK) err = nvs_commit(n);
+    if (err != ESP_OK) ESP_LOGW(TAG, "Could not save appearance: %s", esp_err_to_name(err));
+    nvs_close(n);
 }
 
 static void init_screen(void) {
     now_screen = lv_scr_act();
     controller_ui_create(&ui, now_screen, dock_action, open_players, open_providers,
                          back_clicked, save_providers_clicked);
+    ui.theme_cb = save_theme;
+    nvs_handle_t appearance;
+    uint8_t palette = 0, light = 0;
+    if (nvs_open("controller", NVS_READONLY, &appearance) == ESP_OK) {
+        nvs_get_u8(appearance, "ui_palette", &palette);
+        nvs_get_u8(appearance, "ui_light", &light);
+        nvs_close(appearance);
+    }
+    controller_ui_set_theme(&ui, palette, light == 1);
     players_list = ui.players_list;
     providers_list = ui.providers_list;
     provider_save_status = ui.provider_feedback;
