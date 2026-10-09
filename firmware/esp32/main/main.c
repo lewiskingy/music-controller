@@ -750,6 +750,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
+    esp_err_t err = nvs_flash_init();
     ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
     if (lvgl_port_lock(2000)) {
         init_screen();
@@ -757,7 +758,6 @@ void app_main(void) {
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
-    esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
     ESP_ERROR_CHECK(esp_netif_init());
