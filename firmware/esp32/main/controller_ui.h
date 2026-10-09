@@ -18,6 +18,7 @@ typedef struct {
 typedef void (*ui_action_cb_t)(const ui_intent_t *intent);
 typedef struct {
     const char *track, *artist, *album, *player, *status;
+    const char *art_id;
     const char *player_id, *queue_id, *item_id;
     int volume, position, duration;
     bool connected, available, playing, transport_pending, volume_pending, seek_pending;
@@ -32,6 +33,11 @@ typedef struct {
     lv_obj_t *timeline, *elapsed, *duration;
     lv_obj_t *settings_button, *player_button, *settings_content, *sources_button, *volume_heading;
     lv_obj_t *palette_buttons[6], *mode_buttons[2];
+    lv_obj_t *art_panel, *art_image, *art_placeholder[2], *thumbnail, *thumbnail_image;
+    lv_img_dsc_t art_descriptor, thumbnail_descriptor;
+    lv_color_t *art_pixels, *thumbnail_pixels;
+    char art_id[65];
+    bool art_loaded;
     unsigned palette;
     bool light;
     void (*theme_cb)(unsigned palette, bool light);
@@ -51,3 +57,6 @@ void controller_ui_style_row(lv_obj_t *row, bool selected, bool available);
 
 void controller_ui_set_theme(controller_ui_t *ui, unsigned palette, bool light);
 void controller_ui_style_source(lv_obj_t *obj);
+
+/* Exact MCAR 288x288 little-endian RGB565 packet; caller retains packet ownership. */
+bool controller_ui_set_artwork(controller_ui_t *ui, const char *art_id, const unsigned char *packet, size_t length);

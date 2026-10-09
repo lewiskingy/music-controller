@@ -416,3 +416,11 @@ The header cog opens appearance settings. Six palettes (Green, Blue, Red, Orange
 The bottom tabs match the design: Playing, Queue, Browse, Search. The last three are visible but disabled while their functionality is developed. Use the header player selector for Players and Settings → Music sources for provider selection.
 
 Native acceptance captures 58 screenshots: ten playback/interaction states plus Playing, Settings, Players and Music Sources in each of the twelve themes. Checks include fixed caption fit (including the volume heading), tab positions/order and disabled interaction, persistent dock geometry and containment.
+
+### Gateway-served album artwork
+
+The companion Atlas gateway advertises `artwork_rgb565` and annotates current queue items with `controller_art_id`. Firmware fetches `/device/artwork/{id}` from the same provisioned gateway using the existing device token in a dedicated worker. A complete validated MCAR packet contains a 288 × 288 little-endian RGB565 cover. PSRAM holds the transfer and reusable display buffers; the 40 × 40 dock thumbnail is derived locally. Downloads never hold LVGL locks. Results are discarded after a player, queue, track or artwork change. Same-album artwork is reused. Artwork retains its original colours under every theme.
+
+The gateway supplies a generic record cover for absent or failed provider art. An unreachable/older gateway leaves the local placeholder visible, without affecting playback controls. Companion changes are in Atlas PR #614.
+
+Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks both artwork slots, malformed/truncated packets, stale responses and artwork changes; 73 screenshots include real-cover fixtures and generic covers across twelve themes.

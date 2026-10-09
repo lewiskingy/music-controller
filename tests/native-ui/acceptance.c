@@ -102,7 +102,7 @@ static void geometry(void) {
     no_clipping(ui.root,false);
 }
 int main(int argc,char **argv) {
-    CHECK(argc==2); output_dir=argv[1]; lv_init();
+    CHECK(argc==3); output_dir=argv[1]; lv_init();
     lv_disp_draw_buf_t buffer; lv_disp_draw_buf_init(&buffer,draw_buffer,NULL,480*80);
     lv_disp_drv_t display; lv_disp_drv_init(&display);
     display.hor_res=480; display.ver_res=800; display.draw_buf=&buffer; display.flush_cb=flush;
@@ -172,8 +172,31 @@ int main(int argc,char **argv) {
     state.track="Daydreamer"; state.artist="Adele"; state.album="19";
     state.available=true; state.can_seek=true; state.duration=220; state.playing=true;
     state.status="Connected"; controller_ui_update(&ui,&state);
+    unsigned char *album_packet=malloc(8+288*288*2), *generic_packet=malloc(8+288*288*2);
+    CHECK(album_packet && generic_packet);
+    const char *fixture_names[]={"album","generic"};
+    unsigned char *packets[]={album_packet,generic_packet};
+    for(unsigned i=0;i<2;i++) {
+        char path[1024]; snprintf(path,sizeof(path),"%s/%s.mcar",argv[2],fixture_names[i]);
+        FILE *file=fopen(path,"rb"); CHECK(file);
+        CHECK(fread(packets[i],1,8+288*288*2,file)==8+288*288*2); fclose(file);
+    }
+    state.art_id="mock-album"; controller_ui_update(&ui,&state); controller_ui_show(&ui,UI_PLAYING);
+    CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
+    CHECK(ui.art_loaded && !lv_obj_has_flag(ui.thumbnail_image,LV_OBJ_FLAG_HIDDEN));
+    screenshot("11-album-art"); geometry();
+    CHECK(!controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2-1));
+    album_packet[0]='X'; CHECK(!controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2)); album_packet[0]='M';
+    state.art_id="generic"; controller_ui_update(&ui,&state);
+    CHECK(!ui.art_loaded && lv_obj_has_flag(ui.art_image,LV_OBJ_FLAG_HIDDEN));
+    CHECK(!controller_ui_set_artwork(&ui,"mock-album",album_packet,8+288*288*2));
+    screenshot("12-art-loading");
+    CHECK(controller_ui_set_artwork(&ui,"generic",generic_packet,8+288*288*2));
+    screenshot("13-generic-cover"); geometry();
     const char *themes[]={"green","blue","red","orange","purple","grey"};
     for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
+        state.art_id="mock-album"; controller_ui_update(&ui,&state);
+        CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
         click(ui.settings_button); click(ui.palette_buttons[p]); click(ui.mode_buttons[mode]);
         CHECK(ui.palette==p && ui.light==(bool)mode);
         CHECK(lv_obj_has_state(ui.palette_buttons[p],LV_STATE_CHECKED));
@@ -186,6 +209,12 @@ int main(int argc,char **argv) {
               lv_color_to32(lv_obj_get_style_bg_color(ui.transport[1],LV_PART_MAIN)));
         snprintf(name,sizeof(name),"theme-%s-%s-playing",themes[p],mode?"light":"dark");
         screenshot(name);
+        state.art_id="generic"; controller_ui_update(&ui,&state);
+        CHECK(controller_ui_set_artwork(&ui,state.art_id,generic_packet,8+288*288*2));
+        geometry();
+        snprintf(name,sizeof(name),"theme-%s-%s-generic",themes[p],mode?"light":"dark"); screenshot(name);
+        state.art_id="mock-album"; controller_ui_update(&ui,&state);
+        CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
         unsigned count=intent_count;
         for(unsigned i=1;i<4;i++) click(ui.navigation[i]);
         CHECK(intent_count==count && !lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
@@ -195,6 +224,7 @@ int main(int argc,char **argv) {
         snprintf(name,sizeof(name),"theme-%s-%s-sources",themes[p],mode?"light":"dark"); screenshot(name);
     }
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    printf("PASS: %u layout and interaction checks; 58 screenshots at 480x800\n",checks);
+    printf("PASS: %u layout and interaction checks; 73 screenshots at 480x800\n",checks);
+    free(album_packet); free(generic_packet);
     return 0;
 }

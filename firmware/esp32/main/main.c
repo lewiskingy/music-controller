@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
@@ -16,6 +17,7 @@
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
+#include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -70,6 +72,10 @@ static action_t deferred_volume;
 static bool volume_deferred;
 static bool current_can_volume, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
 static char current_queue_id[129], current_item_id[129], album[160];
+static char current_art_id[65];
+static bool gateway_can_artwork;
+static unsigned char *art_result;
+static char art_result_id[65];
 static int track_duration;
 static double track_position, track_speed = 1.0;
 static bool queue_playing;
@@ -81,6 +87,7 @@ static int action_group(action_type_t type) {
 }
 static void clear_timeline(void) {
     current_queue_id[0] = current_item_id[0] = album[0] = 0;
+    current_art_id[0] = 0;
     track_duration = 0; track_position = 0;
     queue_active = queue_live = queue_allow_seek = queue_playing = false;
 }
@@ -423,6 +430,10 @@ static void queues_received(const cJSON *array) {
         const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
         if (!cJSON_IsObject(media)) media = item;
         field(current_item_id, sizeof(current_item_id), item, "queue_item_id");
+        if (current_item_id[0] && gateway_can_artwork) {
+            field(current_art_id,sizeof(current_art_id),item,"controller_art_id");
+            if (!current_art_id[0]) snprintf(current_art_id,sizeof(current_art_id),"generic");
+        }
         queue_active = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(queue, "active"));
         const cJSON *queue_state = cJSON_GetObjectItemCaseSensitive(queue, "state");
         queue_playing = cJSON_IsString(queue_state) && !strcmp(queue_state->valuestring, "playing");
@@ -470,6 +481,7 @@ static void handle_message(const char *payload, size_t len) {
             provider_fetch_pending = true;
         } else if (!strcmp(event->valuestring, "gateway/capabilities")) {
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "seek"));
+            gateway_can_artwork = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "artwork_rgb565"));
             screen_dirty = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
             ready = false; status("Gateway authentication failed");
@@ -648,6 +660,7 @@ static void update_now_playing(void) {
     if (position > 604800) position = 604800;
     ui_playback_t snapshot = {
         .track = track, .artist = artist, .album = album, .player = player_name, .status = state,
+        .art_id = current_art_id,
         .player_id = player_id, .queue_id = current_queue_id, .item_id = current_item_id,
         .volume = current_volume, .position = (int)position, .duration = track_duration,
         .connected = ready, .available = current_available, .playing = current_playing,
@@ -657,6 +670,10 @@ static void update_now_playing(void) {
         .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live
     };
     controller_ui_update(&ui, &snapshot);
+    if (art_result) {
+        controller_ui_set_artwork(&ui,art_result_id,art_result,8+288*288*2);
+        free(art_result); art_result=NULL;
+    }
     lv_label_set_text(provider_save_status, provider_feedback);
 }
 static void build_players_view(void) {
@@ -711,6 +728,75 @@ static void build_providers_view(void) {
     }
 }
 
+static esp_err_t art_http_event(esp_http_client_event_t *event) {
+    if(event->event_id==HTTP_EVENT_ON_HEADER && event->header_key &&
+       !strcasecmp(event->header_key,"X-Artwork-Fallback"))
+        *(bool *)event->user_data = !strcmp(event->header_value,"1");
+    return ESP_OK;
+}
+/* Dedicated worker: network and image transfer never hold LVGL or state locks. */
+static void artwork_worker(void *unused) {
+    (void)unused;
+    char completed[65]="";
+    bool last_fallback=false;
+    int64_t last_completed=0;
+    for(;;) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        char id[65], target_player[129], target_queue[129], target_item[129];
+        if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) continue;
+        bool fetch=ready && gateway_can_artwork && current_art_id[0] && (strcmp(completed,current_art_id) || !ui.art_loaded ||
+            (last_fallback && strcmp(current_art_id,"generic") && esp_timer_get_time()-last_completed>30000000LL));
+        snprintf(id,sizeof(id),"%s",current_art_id);
+        snprintf(target_player,sizeof(target_player),"%s",player_id);
+        snprintf(target_queue,sizeof(target_queue),"%s",current_queue_id);
+        snprintf(target_item,sizeof(target_item),"%s",current_item_id);
+        xSemaphoreGive(state_mutex);
+        if(!fetch) continue;
+        char endpoint[320];
+        const char *rest=NULL, *scheme=NULL;
+        if(!strncmp(url,"ws://",5)) { rest=url+5; scheme="http://"; }
+        else if(!strncmp(url,"wss://",6)) { rest=url+6; scheme="https://"; }
+        else continue;
+        snprintf(endpoint,sizeof(endpoint),"%s%s",scheme,rest);
+        char *suffix=strrchr(endpoint,'/');
+        if(!suffix || strcmp(suffix,"/ws")) continue;
+        snprintf(suffix,sizeof(endpoint)-(suffix-endpoint),"/artwork/%s",id);
+        enum { BYTES=8+288*288*2 };
+        unsigned char *data=heap_caps_malloc(BYTES,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if(!data) { vTaskDelay(pdMS_TO_TICKS(5000)); continue; }
+        bool fallback=false;
+        esp_http_client_config_t config={.event_handler=art_http_event,.user_data=&fallback,.url=endpoint,.timeout_ms=10000,.crt_bundle_attach=esp_crt_bundle_attach,
+                                        .disable_auto_redirect=true};
+        esp_http_client_handle_t client=esp_http_client_init(&config);
+        int received=0;
+        if(client) {
+            esp_http_client_set_header(client,"X-Device-Token",token);
+            if(esp_http_client_open(client,0)==ESP_OK && esp_http_client_fetch_headers(client)==BYTES &&
+               esp_http_client_get_status_code(client)==200) {
+                while(received<BYTES) {
+                    int count=esp_http_client_read(client,(char *)data+received,BYTES-received);
+                    if(count<=0) break;
+                    received+=count;
+                }
+            }
+            esp_http_client_close(client); esp_http_client_cleanup(client);
+        }
+        if(received==BYTES && !memcmp(data,"MCAR\x20\x01\x20\x01",8) &&
+           xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+            if(ready && !strcmp(current_art_id,id) &&
+               playback_target_matches(player_id,current_queue_id,current_item_id,target_player,target_queue,target_item,true)) {
+                free(art_result); art_result=data; data=NULL;
+                snprintf(art_result_id,sizeof(art_result_id),"%s",id);
+                snprintf(completed,sizeof(completed),"%s",id);
+                last_completed=esp_timer_get_time(); last_fallback=fallback; screen_dirty=true;
+            }
+            xSemaphoreGive(state_mutex);
+        }
+        free(data);
+        if(received!=BYTES) vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
 static void save_theme(unsigned palette, bool light) {
     nvs_handle_t n;
     if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) return;
@@ -760,6 +846,7 @@ void app_main(void) {
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
+    ESP_ERROR_CHECK(xTaskCreate(artwork_worker,"artwork",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();

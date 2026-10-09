@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "controller_ui.h"
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
 
 /* Semantic colours are shared styles, so new and existing controls update together. */
 enum { BG, SURFACE, CARD, ACTIVE, TEXT, MUTED, ACCENT, ROLE_COUNT };
@@ -206,10 +209,16 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->players_content = panel(root, 0, UI_HEADER_HEIGHT, UI_CONTENT_WIDTH, UI_CONTENT_HEIGHT, BG);
     ui->providers_content = panel(root, 0, UI_HEADER_HEIGHT, UI_CONTENT_WIDTH, UI_CONTENT_HEIGHT, BG);
     lv_obj_t *art = panel(ui->now_content, 56, 20, 288, 288, ACTIVE);
+    ui->art_panel = art;
     lv_obj_set_style_radius(art, 12, 0);
+    lv_obj_set_style_clip_corner(art,true,0);
     lv_obj_t *music = label(art, LV_SYMBOL_AUDIO, 110, 100, 68, ACCENT, true);
+    ui->art_placeholder[0] = music;
     lv_obj_set_style_text_align(music, LV_TEXT_ALIGN_CENTER, 0);
-    label(art, "Album artwork", 72, 220, 180, MUTED, false);
+    ui->art_placeholder[1] = label(art, "Album artwork", 72, 220, 180, MUTED, false);
+    ui->art_image = lv_img_create(art);
+    lv_obj_set_pos(ui->art_image,0,0);
+    lv_obj_add_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
     ui->title = label(ui->now_content, "Nothing playing", 24, 326, 352, TEXT, true);
     lv_obj_set_height(ui->title, 58);
     lv_obj_set_style_text_align(ui->title, LV_TEXT_ALIGN_CENTER, 0);
@@ -236,7 +245,12 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->provider_feedback = label(ui->providers_content, "Tap checkboxes, then Save", 24, 503, 352, MUTED, false);
     lv_obj_t *dock = panel(root, 0, UI_DOCK_Y, UI_WIDTH, UI_DOCK_HEIGHT, SURFACE);
     lv_obj_t *thumbnail = panel(dock, 24, 12, 40, 40, ACTIVE);
+    ui->thumbnail = thumbnail;
+    ui->thumbnail_image = lv_img_create(thumbnail);
+    lv_obj_set_pos(ui->thumbnail_image,0,0);
+    lv_obj_add_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_radius(thumbnail, 6, 0);
+    lv_obj_set_style_clip_corner(thumbnail,true,0);
     ui->mini_title = label(dock, "Nothing playing", 76, 12, 380, TEXT, false);
     ui->mini_artist = label(dock, "", 76, 34, 380, MUTED, false);
     ui->transport[0] = button(dock, LV_SYMBOL_PREV, 108, 68, 64, 56, dock_clicked, ui);
@@ -299,6 +313,14 @@ static void enabled(lv_obj_t *obj, bool value) {
     else lv_obj_add_state(obj, LV_STATE_DISABLED);
 }
 void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
+    const char *art_id = state->art_id ? state->art_id : "";
+    if (strcmp(ui->art_id,art_id)) {
+        snprintf(ui->art_id,sizeof(ui->art_id),"%s",art_id);
+        ui->art_loaded=false;
+        lv_obj_add_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
+        for(unsigned i=0;i<2;i++) lv_obj_clear_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
+    }
     bool player_changed = strcmp(ui->current.player_id, state->player_id) != 0;
     bool track_changed = player_changed || strcmp(ui->current.queue_id, state->queue_id) ||
                          strcmp(ui->current.item_id, state->item_id);
@@ -341,4 +363,39 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
     if (state->live) { lv_label_set_text(ui->elapsed, "Live"); lv_label_set_text(ui->duration, ""); }
     else if (state->duration > 0) time_text(ui->duration, state->duration);
     else lv_label_set_text(ui->duration, "--:--");
+}
+
+static void *art_allocate(size_t bytes) {
+#ifdef ESP_PLATFORM
+    return heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return lv_mem_alloc(bytes);
+#endif
+}
+bool controller_ui_set_artwork(controller_ui_t *ui, const char *art_id, const unsigned char *packet, size_t length) {
+    if(!art_id || strcmp(ui->art_id,art_id) || !packet || length!=8+288*288*2 ||
+       memcmp(packet,"MCAR",4) || packet[4]!=32 || packet[5]!=1 || packet[6]!=32 || packet[7]!=1) return false;
+    if(!ui->art_pixels) ui->art_pixels=art_allocate(288*288*sizeof(lv_color_t));
+    if(!ui->thumbnail_pixels) ui->thumbnail_pixels=art_allocate(40*40*sizeof(lv_color_t));
+    if(!ui->art_pixels || !ui->thumbnail_pixels) return false;
+    for(unsigned i=0;i<288*288;i++) {
+        unsigned value=packet[8+i*2] | ((unsigned)packet[9+i*2]<<8);
+        ui->art_pixels[i]=lv_color_make(((value>>11)&31)*255/31,((value>>5)&63)*255/63,(value&31)*255/31);
+    }
+    for(unsigned y=0;y<40;y++) for(unsigned x=0;x<40;x++)
+        ui->thumbnail_pixels[y*40+x]=ui->art_pixels[(y*288/40)*288+x*288/40];
+    ui->art_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=288,.h=288},
+        .data_size=288*288*sizeof(lv_color_t),.data=(const uint8_t *)ui->art_pixels};
+    ui->thumbnail_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=40,.h=40},
+        .data_size=40*40*sizeof(lv_color_t),.data=(const uint8_t *)ui->thumbnail_pixels};
+    lv_img_cache_invalidate_src(&ui->art_descriptor);
+    lv_img_cache_invalidate_src(&ui->thumbnail_descriptor);
+    lv_img_set_src(ui->art_image,&ui->art_descriptor);
+    lv_img_set_src(ui->thumbnail_image,&ui->thumbnail_descriptor);
+    lv_obj_clear_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
+    for(unsigned i=0;i<2;i++) lv_obj_add_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
+    ui->art_loaded=true;
+    lv_obj_invalidate(ui->art_image); lv_obj_invalidate(ui->thumbnail_image);
+    return true;
 }

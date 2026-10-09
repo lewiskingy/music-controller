@@ -51,7 +51,8 @@ jobs:
         run: |
           mkdir -p artifacts/native-ui
           set -o pipefail
-          build/native-ui/ui_acceptance artifacts/native-ui 2>&1 | tee artifacts/native-ui/acceptance.log
+          python tests/native-ui/mock_artwork.py build/mock-artwork
+          build/native-ui/ui_acceptance artifacts/native-ui build/mock-artwork 2>&1 | tee artifacts/native-ui/acceptance.log
       - name: Convert captured screenshots to PNG
         if: always()
         run: python tests/native-ui/convert_screenshots.py artifacts/native-ui
