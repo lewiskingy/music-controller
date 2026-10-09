@@ -167,10 +167,10 @@ static void process_action(const action_t *action) {
         case ACT_PREVIOUS: command = "players/cmd/previous"; break;
         case ACT_NEXT: command = "players/cmd/next"; break;
         case ACT_VOLUME_DOWN:
-            volume = volume > 10 ? volume - 10 : 0;
+            volume = volume <= 0 ? 0 : ((volume - 1) / 5) * 5;
             command = "players/cmd/volume_set"; volume_command = true; break;
         case ACT_VOLUME_UP:
-            volume = volume < 90 ? volume + 10 : 100;
+            volume = volume >= 100 ? 100 : ((volume / 5) + 1) * 5;
             command = "players/cmd/volume_set"; volume_command = true; break;
         default: return;
     }
