@@ -141,6 +141,20 @@ static void save_preferred_player(const char *id) {
     else ESP_LOGI(TAG, "Player selection saved to NVS");
 }
 static void process_action(const action_t *action) {
+    if (action->type == ACT_PROVIDER_TOGGLE) {
+        if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+        bool found = false;
+        for (size_t i = 0; i < music_provider_count; ++i) {
+            if (!strcmp(music_providers[i].id, action->player_id)) {
+                music_providers[i].selected = action->selected;
+                found = true;
+                break;
+            }
+        }
+        xSemaphoreGive(state_mutex);
+        if (found) save_music_providers();
+        return;
+    }
     if (action->type == ACT_SELECT) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         bool found = false;
@@ -242,6 +256,67 @@ static void players_received(const cJSON *array) {
     xSemaphoreGive(state_mutex);
     if (selection_changed) refresh_pending = true;
 }
+
+static bool provider_is_selected(const char *id) {
+    if (!provider_selection_saved) return true;
+    char needle[100];
+    snprintf(needle, sizeof(needle), "|%s|", id);
+    return strstr(selected_provider_ids, needle) != NULL;
+}
+static void save_music_providers(void) {
+    char value[PROVIDER_SELECTION_SIZE] = "";
+    for (size_t i = 0; i < music_provider_count; ++i) {
+        if (!music_providers[i].selected) continue;
+        size_t remaining = sizeof(value) - strlen(value);
+        if (remaining <= strlen(music_providers[i].id) + 2) {
+            status("Provider selection too large");
+            return;
+        }
+        strcat(value, "|");
+        strcat(value, music_providers[i].id);
+        strcat(value, "|");
+    }
+    nvs_handle_t n;
+    if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) {
+        status("Cannot save providers");
+        return;
+    }
+    esp_err_t err = nvs_set_str(n, "music_sources", value);
+    if (err == ESP_OK) err = nvs_commit(n);
+    nvs_close(n);
+    if (err != ESP_OK) { status("Cannot save providers"); return; }
+    snprintf(selected_provider_ids, sizeof(selected_provider_ids), "%s", value);
+    provider_selection_saved = true;
+    ESP_LOGI(TAG, "Music provider selection saved (%u bytes)", (unsigned)strlen(value));
+}
+static void providers_received(const cJSON *array) {
+    if (!cJSON_IsArray(array) || !state_mutex) {
+        status("Provider response unavailable");
+        return;
+    }
+    if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    music_provider_count = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, array) {
+        if (music_provider_count >= MAX_PROVIDERS) break;
+        const cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+        if (!cJSON_IsString(type) || strcmp(type->valuestring, "music")) continue;
+        const cJSON *available = cJSON_GetObjectItemCaseSensitive(item, "available");
+        if (cJSON_IsFalse(available)) continue;
+        music_provider_t *provider = &music_providers[music_provider_count];
+        memset(provider, 0, sizeof(*provider));
+        field(provider->id, sizeof(provider->id), item, "instance_id");
+        if (!provider->id[0]) continue;
+        field(provider->name, sizeof(provider->name), item, "name");
+        if (!provider->name[0]) snprintf(provider->name, sizeof(provider->name), "%s", provider->id);
+        provider->selected = provider_is_selected(provider->id);
+        music_provider_count++;
+    }
+    providers_dirty = true;
+    xSemaphoreGive(state_mutex);
+    ESP_LOGI(TAG, "Music providers discovered: %u", (unsigned)music_provider_count);
+}
+
 static void queues_received(const cJSON *array) {
     if (!cJSON_IsArray(array) || !state_mutex) return;
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
