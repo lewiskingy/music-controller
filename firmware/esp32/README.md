@@ -424,3 +424,11 @@ The companion Atlas gateway advertises `artwork_rgb565` and annotates current qu
 The gateway supplies a generic record cover for absent or failed provider art. An unreachable/older gateway leaves the local placeholder visible, without affecting playback controls. Companion changes are in Atlas PR #614.
 
 Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks both artwork slots, malformed/truncated packets, stale responses and artwork changes; 73 screenshots include real-cover fixtures and generic covers across twelve themes.
+
+### Queue
+
+Queue is enabled in the bottom navigation. It opens the page containing the selected player's current queue index, loads at most 20 tracks, highlights the current item, and shows artist and duration. Previous/Next page controls bound memory; Refresh retries the current page. Loading, empty, API error, timeout, disconnected, unavailable-track and older-gateway states are explicit. Browse and Search remain disabled.
+
+Tap-to-play sends `player_queues/play_index` with the stable queue item ID as `index`, not a numeric position. The companion gateway advertises `queue_item_play` and validates either form. Removed items fail through the API rather than playing a replacement at the same position. Responses match request ID, player, queue and offset; row taps capture player/queue/item identity. Playback remains authoritative and transport pending/ACK/timeout handling is reused.
+
+Acceptance includes mocked queue loading, 20-item pages, last page, row playback, disabled/unavailable rows, stale player targets, errors, disconnection and twelve themed Queue screenshots. Total native screenshot count: 91. Gateway contract tests cover stable IDs and bounded pagination.

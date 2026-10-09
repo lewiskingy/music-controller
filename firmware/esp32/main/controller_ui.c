@@ -165,6 +165,19 @@ static void slider_event(lv_event_t *event) {
         *valid = false;
     }
 }
+static void queue_clicked(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_t *target=lv_event_get_target(event);
+    if(target==ui->navigation[1]) {
+        controller_ui_show(ui,UI_QUEUE);
+        send_intent(ui,UI_QUEUE_OPEN,0,&ui->current);
+    } else if(target==ui->queue_back) send_intent(ui,UI_QUEUE_BACK,0,&ui->current);
+    else if(target==ui->queue_more) send_intent(ui,UI_QUEUE_MORE,0,&ui->current);
+    else if(target==ui->queue_refresh) send_intent(ui,UI_QUEUE_REFRESH,0,&ui->current);
+    else for(unsigned i=0;i<ui->queue_count;i++) if(target==ui->queue_rows[i]) {
+        send_intent(ui,UI_QUEUE_PLAY,0,&ui->queue_targets[i]); break;
+    }
+}
 static lv_obj_t *slider(lv_obj_t *parent, int x, int y, int w, int h, controller_ui_t *ui) {
     lv_obj_t *obj = lv_slider_create(parent);
     lv_obj_set_pos(obj, x, y);
@@ -273,9 +286,18 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_t *nav = panel(root, 0, UI_NAV_Y, UI_WIDTH, UI_NAV_HEIGHT, BG);
     const char *tabs[] = {"Playing", "Queue", "Browse", "Search"};
     for (unsigned i=0;i<4;i++) {
-        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:NULL,NULL);
-        if(i) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
+        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:(i==1?queue_clicked:NULL),i==1?ui:NULL);
+        if(i>1) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
     }
+    ui->queue_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
+    ui->queue_info=label(ui->queue_content,"Queue",24,20,352,MUTED,false);
+    ui->queue_list=panel(ui->queue_content,24,60,352,380,BG);
+    lv_obj_add_flag(ui->queue_list,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(ui->queue_list,LV_FLEX_FLOW_COLUMN);
+    ui->queue_back=button(ui->queue_content,"Previous",24,452,100,48,queue_clicked,ui);
+    ui->queue_refresh=button(ui->queue_content,"Refresh",132,452,136,48,queue_clicked,ui);
+    ui->queue_more=button(ui->queue_content,"Next",276,452,100,48,queue_clicked,ui);
+    ui->queue_feedback=label(ui->queue_content,"Open Queue to load tracks",24,504,352,MUTED,false);
     ui->settings_content = panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     label(ui->settings_content,"Colour palette",24,20,352,TEXT,true);
     for(unsigned i=0;i<6;i++) {
@@ -295,17 +317,17 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     controller_ui_show(ui, UI_PLAYING);
 }
 void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
-    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content};
-    for (unsigned i = 0; i < 4; ++i) {
+    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content};
+    for (unsigned i = 0; i < 5; ++i) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
     }
-    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings"};
+    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue"};
     lv_label_set_text(ui->heading, titles[view]);
     for (unsigned i = 0; i < 4; ++i) {
         lv_obj_remove_style(ui->navigation[i], &backgrounds[ACTIVE], 0);
         lv_obj_remove_style(ui->navigation[i], &backgrounds[BG], 0);
-        bg(ui->navigation[i], i == 0 && view == UI_PLAYING ? ACTIVE : BG, 0);
+        bg(ui->navigation[i], ((i == 0 && view == UI_PLAYING) || (i == 1 && view == UI_QUEUE)) ? ACTIVE : BG, 0);
     }
 }
 static void enabled(lv_obj_t *obj, bool value) {
@@ -322,6 +344,12 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
         for(unsigned i=0;i<2;i++) lv_obj_clear_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
     }
     bool player_changed = strcmp(ui->current.player_id, state->player_id) != 0;
+    ui->queue_enabled=state->connected && state->available && state->can_queue && !state->transport_pending;
+    for(unsigned i=0;i<ui->queue_count;i++) {
+        bool same=!strcmp(ui->queue_targets[i].player_id,state->player_id) &&
+                  !strcmp(ui->queue_targets[i].queue_id,state->queue_id);
+        enabled(ui->queue_rows[i],ui->queue_enabled && same && ui->queue_targets[i].value);
+    }
     bool track_changed = player_changed || strcmp(ui->current.queue_id, state->queue_id) ||
                          strcmp(ui->current.item_id, state->item_id);
     if (player_changed || !state->connected || !state->available || !state->can_volume)
@@ -398,4 +426,39 @@ bool controller_ui_set_artwork(controller_ui_t *ui, const char *art_id, const un
     ui->art_loaded=true;
     lv_obj_invalidate(ui->art_image); lv_obj_invalidate(ui->thumbnail_image);
     return true;
+}
+
+void controller_ui_queue(controller_ui_t *ui, const ui_queue_item_t *items, unsigned count,
+                         int offset, int total, const char *current_item, const char *message,
+                         bool loading, bool can_play) {
+    lv_obj_clean(ui->queue_list); ui->queue_count=0;
+    if(count>UI_QUEUE_PAGE_SIZE) count=UI_QUEUE_PAGE_SIZE;
+    char text[100];
+    if(count) snprintf(text,sizeof(text),"%d-%d of %d tracks",offset+1,offset+(int)count,total);
+    else snprintf(text,sizeof(text),"Queue");
+    lv_label_set_text(ui->queue_info,text);
+    lv_label_set_text(ui->queue_feedback,message);
+    enabled(ui->queue_back,!loading && offset>0);
+    enabled(ui->queue_more,!loading && offset+(int)count<total);
+    enabled(ui->queue_refresh,!loading);
+    for(unsigned i=0;i<count;i++) {
+        bool selected=current_item && !strcmp(items[i].id,current_item);
+        lv_obj_t *row=button(ui->queue_list,"",0,0,352,72,queue_clicked,ui);
+        lv_obj_set_flex_grow(row,0); lv_obj_set_style_pad_all(row,0,0);
+        lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_del(lv_obj_get_child(row,0));
+        bg(row,selected?ACTIVE:SURFACE,0);
+        label(row,selected?LV_SYMBOL_PLAY:"",8,24,24,ACCENT,false);
+        label(row,items[i].title,40,8,300,TEXT,false);
+        label(row,items[i].artist,40,38,224,MUTED,false);
+        char duration[24];
+        if(items[i].duration>0) snprintf(duration,sizeof(duration),"%d:%02d",items[i].duration/60,items[i].duration%60);
+        else snprintf(duration,sizeof(duration),"--:--");
+        label(row,duration,276,38,64,MUTED,false);
+        ui->queue_targets[i]=ui->current;
+        snprintf(ui->queue_targets[i].item_id,sizeof(ui->queue_targets[i].item_id),"%s",items[i].id);
+        ui->queue_targets[i].value=items[i].available && items[i].id[0];
+        enabled(row,!loading && can_play && ui->queue_targets[i].value);
+        ui->queue_rows[i]=row; ui->queue_count++;
+    }
 }

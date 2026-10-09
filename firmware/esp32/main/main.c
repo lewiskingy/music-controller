@@ -56,8 +56,8 @@ static volatile bool providers_dirty = true;
 static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
-typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS } view_t;
-typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_VOLUME_SET, ACT_SEEK } action_type_t;
+typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS, VIEW_QUEUE } view_t;
+typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_VOLUME_SET, ACT_SEEK, ACT_QUEUE_PLAY } action_type_t;
 typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; int position; char queue_id[129], item_id[129]; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
 static controller_ui_t ui;
@@ -70,12 +70,25 @@ typedef struct { bool pending; char id[24]; int64_t started; } pending_command_t
 static pending_command_t commands[PLAYBACK_GROUPS];
 static action_t deferred_volume;
 static bool volume_deferred;
-static bool current_can_volume, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
+static bool current_can_volume, gateway_can_queue, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
 static char current_queue_id[129], current_item_id[129], album[160];
 static char current_art_id[65];
 static bool gateway_can_artwork;
 static unsigned char *art_result;
 static char art_result_id[65];
+static ui_queue_item_t queue_items[UI_QUEUE_PAGE_SIZE];
+static unsigned queue_count;
+static int queue_offset, queue_total, current_queue_index;
+static bool queue_loading, queue_requested, queue_dirty=true;
+static char queue_request_id[24], queue_request_player[129], queue_request_queue[129];
+static char queue_message[96]="Open Queue to load tracks";
+static int queue_request_offset;
+static int64_t queue_request_started;
+static void reset_queue(void) {
+    queue_count=0; queue_offset=0; queue_total=0;
+    queue_loading=false; queue_request_id[0]=0; queue_requested=true; queue_dirty=true;
+    snprintf(queue_message,sizeof(queue_message),"Loading queue...");
+}
 static int track_duration;
 static double track_position, track_speed = 1.0;
 static bool queue_playing;
@@ -118,6 +131,7 @@ static void providers_received(const cJSON *array);
 static void build_players_view(void);
 static void build_providers_view(void);
 static void update_now_playing(void);
+static void build_queue_view(void);
 static bool render(void) {
     if (!now_screen || !lvgl_port_lock(250)) return false;
     bool rendered = false;
@@ -125,6 +139,7 @@ static bool render(void) {
         update_now_playing();
         if (players_dirty) { build_players_view(); players_dirty = false; }
         if (providers_dirty) { build_providers_view(); providers_dirty = false; }
+        if (queue_dirty) { build_queue_view(); queue_dirty=false; }
         xSemaphoreGive(state_mutex);
         rendered = true;
     }
@@ -151,7 +166,7 @@ static void request(const char *command, char type) {
     if (sent < 0) ESP_LOGE(TAG, "Failed to send MA request %c", type);
 }
 
-static bool command_with_args(const char *command, const char *id, int volume, bool with_volume, int group, int seek_position) {
+static bool command_with_args(const char *command, const char *id, int volume, bool with_volume, int group, int seek_position, const char *queue_item) {
     if (!ready || !esp_websocket_client_is_connected(socket_handle) || !id[0]) return false;
     cJSON *message = cJSON_CreateObject();
     cJSON *args = cJSON_CreateObject();
@@ -160,7 +175,8 @@ static bool command_with_args(const char *command, const char *id, int volume, b
     snprintf(message_id, sizeof(message_id), "c%u", ++request_id);
     cJSON_AddStringToObject(message, "message_id", message_id);
     cJSON_AddStringToObject(message, "command", command);
-    cJSON_AddStringToObject(args, group == PLAYBACK_SEEK ? "queue_id" : "player_id", id);
+    cJSON_AddStringToObject(args, queue_item || group == PLAYBACK_SEEK ? "queue_id" : "player_id", id);
+    if(queue_item) cJSON_AddStringToObject(args,"index",queue_item);
     if (group == PLAYBACK_SEEK) cJSON_AddNumberToObject(args, "position", seek_position);
     if (with_volume) cJSON_AddNumberToObject(args, "volume_level", volume);
     cJSON_AddItemToObject(message, "args", args);
@@ -231,6 +247,7 @@ static void process_action(const action_t *action) {
             snprintf(track, sizeof(track), "Loading player...");
             artist[0] = 0;
             clear_timeline();
+            reset_queue();
             current_available = false;
             current_playing = false;
             snprintf(player_name, sizeof(player_name), "Loading player...");
@@ -248,6 +265,8 @@ static void process_action(const action_t *action) {
     bool allowed = ready && current_available &&
         playback_target_matches(player_id, current_queue_id, current_item_id,
                                 action->player_id, action->queue_id, action->item_id, group == PLAYBACK_SEEK);
+    if(action->type==ACT_QUEUE_PLAY) allowed=allowed && gateway_can_queue &&
+        current_queue_id[0] && !strcmp(current_queue_id,action->queue_id) && action->item_id[0];
     if (group == PLAYBACK_VOLUME) allowed = allowed && current_can_volume;
     if (group == PLAYBACK_SEEK) allowed = allowed && can_seek() && !commands[PLAYBACK_TRANSPORT].pending;
     int seek_position = playback_seek_position(action->position, track_duration);
@@ -270,10 +289,12 @@ static void process_action(const action_t *action) {
             volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
             command = "players/cmd/volume_set"; volume_command = true; break;
         case ACT_SEEK: command = "player_queues/seek"; break;
+        case ACT_QUEUE_PLAY: command="player_queues/play_index"; break;
         default: finish_command(group); return;
     }
-    const char *target = group == PLAYBACK_SEEK ? action->queue_id : action->player_id;
-    if (!command_with_args(command, target, volume, volume_command, group, seek_position)) {
+    const char *target = group == PLAYBACK_SEEK || action->type==ACT_QUEUE_PLAY ? action->queue_id : action->player_id;
+    if (!command_with_args(command, target, volume, volume_command, group, seek_position,
+                           action->type==ACT_QUEUE_PLAY ? action->item_id : NULL)) {
         status("Unable to send command"); finish_command(group);
     }
     refresh_pending = true;
@@ -420,16 +441,23 @@ static double number_or(const cJSON *obj, const char *key, double fallback) {
 static void queues_received(const cJSON *array) {
     if (!cJSON_IsArray(array) || !state_mutex) return;
     if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
+    char previous_item[129]; snprintf(previous_item,sizeof(previous_item),"%s",current_item_id);
+    int previous_total=queue_total;
     clear_timeline();
     const cJSON *queue;
     cJSON_ArrayForEach(queue, array) {
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(queue, "queue_id");
         if (!cJSON_IsString(id) || strcmp(id->valuestring, player_id)) continue;
         field(current_queue_id, sizeof(current_queue_id), queue, "queue_id");
+        double total=number_or(queue,"items",0);
+        queue_total=total>=0 && total<=100000 ? (int)total : 0;
+        double index=number_or(queue,"current_index",0);
+        current_queue_index=index>=0 && index<100000 ? (int)index : 0;
         const cJSON *item = cJSON_GetObjectItemCaseSensitive(queue, "current_item");
         const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
         if (!cJSON_IsObject(media)) media = item;
         field(current_item_id, sizeof(current_item_id), item, "queue_item_id");
+        if(active_view==VIEW_QUEUE && (strcmp(previous_item,current_item_id) || previous_total!=queue_total)) queue_requested=true;
         if (current_item_id[0] && gateway_can_artwork) {
             field(current_art_id,sizeof(current_art_id),item,"controller_art_id");
             if (!current_art_id[0]) snprintf(current_art_id,sizeof(current_art_id),"generic");
@@ -468,6 +496,75 @@ static void queues_received(const cJSON *array) {
     screen_dirty = true;
     xSemaphoreGive(state_mutex);
 }
+static void request_queue_page(void) {
+    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
+    if(!queue_requested || queue_loading) { xSemaphoreGive(state_mutex); return; }
+    queue_requested=false;
+    if(!ready || !current_available || !current_queue_id[0]) {
+        queue_count=0; queue_total=0; queue_dirty=true;
+        snprintf(queue_message,sizeof(queue_message),!ready?"Disconnected - reconnect to load":"No queue for this player");
+        xSemaphoreGive(state_mutex); return;
+    }
+    queue_loading=true; queue_count=0; queue_dirty=true;
+    snprintf(queue_message,sizeof(queue_message),"Loading queue...");
+    snprintf(queue_request_id,sizeof(queue_request_id),"i%u",++request_id);
+    snprintf(queue_request_player,sizeof(queue_request_player),"%s",player_id);
+    snprintf(queue_request_queue,sizeof(queue_request_queue),"%s",current_queue_id);
+    queue_request_offset=queue_offset; queue_request_started=esp_timer_get_time();
+    cJSON *message=cJSON_CreateObject(), *args=cJSON_CreateObject();
+    if(!message || !args) {
+        cJSON_Delete(message); cJSON_Delete(args); queue_loading=false; queue_dirty=true;
+        snprintf(queue_message,sizeof(queue_message),"Not enough memory - tap Refresh");
+        xSemaphoreGive(state_mutex); return;
+    }
+    cJSON_AddStringToObject(message,"message_id",queue_request_id);
+    cJSON_AddStringToObject(message,"command","player_queues/items");
+    cJSON_AddStringToObject(args,"queue_id",queue_request_queue);
+    cJSON_AddNumberToObject(args,"limit",UI_QUEUE_PAGE_SIZE);
+    cJSON_AddNumberToObject(args,"offset",queue_offset);
+    cJSON_AddItemToObject(message,"args",args);
+    char *payload=cJSON_PrintUnformatted(message); cJSON_Delete(message);
+    xSemaphoreGive(state_mutex);
+    bool sent=payload && esp_websocket_client_send_text(socket_handle,payload,strlen(payload),pdMS_TO_TICKS(1000))==(int)strlen(payload);
+    free(payload);
+    if(!sent && xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+        queue_loading=false; queue_dirty=true;
+        snprintf(queue_message,sizeof(queue_message),"Queue request failed - tap Refresh");
+        xSemaphoreGive(state_mutex);
+    }
+    screen_dirty=true;
+}
+static void queue_page_received(const char *id, const cJSON *result, bool error) {
+    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
+    bool matches=queue_loading && !strcmp(id,queue_request_id) &&
+        !strcmp(player_id,queue_request_player) && !strcmp(current_queue_id,queue_request_queue) &&
+        queue_offset==queue_request_offset;
+    if(matches) {
+        queue_loading=false; queue_count=0;
+        if(error || !cJSON_IsArray(result)) snprintf(queue_message,sizeof(queue_message),"Could not load queue - tap Refresh");
+        else {
+            const cJSON *item;
+            cJSON_ArrayForEach(item,result) {
+                if(queue_count>=UI_QUEUE_PAGE_SIZE) break;
+                ui_queue_item_t *row=&queue_items[queue_count++]; memset(row,0,sizeof(*row));
+                field(row->id,sizeof(row->id),item,"queue_item_id");
+                field(row->title,sizeof(row->title),item,"name");
+                const cJSON *media=cJSON_GetObjectItemCaseSensitive(item,"media_item");
+                if(!row->title[0]) field(row->title,sizeof(row->title),media,"name");
+                if(!row->title[0]) snprintf(row->title,sizeof(row->title),"Unnamed track");
+                field(row->artist,sizeof(row->artist),cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(media,"artists"),0),"name");
+                double duration=number_or(item,"duration",number_or(media,"duration",0));
+                row->duration=duration>0 && duration<=604800 ? (int)duration : 0;
+                row->available=!cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(media,"available")) &&
+                    !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(item,"available"));
+            }
+            if(queue_total<queue_offset+(int)queue_count) queue_total=queue_offset+queue_count;
+            snprintf(queue_message,sizeof(queue_message),queue_count?"Tap a track to play":"Queue is empty");
+        }
+        queue_dirty=true; screen_dirty=true;
+    }
+    xSemaphoreGive(state_mutex);
+}
 static void handle_message(const char *payload, size_t len) {
     cJSON *msg = cJSON_ParseWithLength(payload, len);
     if (!msg) { ESP_LOGW(TAG, "Invalid JSON response (%u bytes)", (unsigned)len); return; }
@@ -477,22 +574,29 @@ static void handle_message(const char *payload, size_t len) {
         if (!strcmp(event->valuestring, "gateway/ready")) {
             const cJSON *caps = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "capabilities");
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(caps, "seek"));
+            gateway_can_queue=false;
             ready = true; status("Connected"); refresh_pending = true;
             provider_fetch_pending = true;
         } else if (!strcmp(event->valuestring, "gateway/capabilities")) {
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "seek"));
+            gateway_can_queue = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "queue_item_play"));
             gateway_can_artwork = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "artwork_rgb565"));
             screen_dirty = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
             ready = false; status("Gateway authentication failed");
         } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
             refresh_pending = true;
+            if(strstr(event->valuestring,"queue_items") && active_view==VIEW_QUEUE) queue_requested=true;
         }
     }
     const cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "message_id");
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
     const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
     if (!error || cJSON_IsNull(error) || cJSON_IsFalse(error)) error = cJSON_GetObjectItemCaseSensitive(msg, "error_code");
+    if(cJSON_IsString(mid) && mid->valuestring[0]=='i') {
+        queue_page_received(mid->valuestring,result,error && !cJSON_IsNull(error) && !cJSON_IsFalse(error));
+        cJSON_Delete(msg); return;
+    }
     if (cJSON_IsString(mid)) {
         int reply_group = -1;
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) == pdTRUE) {
@@ -504,6 +608,10 @@ static void handle_message(const char *payload, size_t len) {
         if (error && !cJSON_IsNull(error) && !cJSON_IsFalse(error)) {
             ESP_LOGE(TAG, "MA response %c returned error", mid->valuestring[0]);
             status("Music Assistant API error");
+            if(reply_group==PLAYBACK_TRANSPORT && xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+                snprintf(queue_message,sizeof(queue_message),"Playback failed - try another track"); queue_dirty=true;
+                xSemaphoreGive(state_mutex);
+            }
         } else if (cJSON_IsArray(result)) {
             ESP_LOGI(TAG, "MA response %c: %d items", mid->valuestring[0], cJSON_GetArraySize(result));
             if (mid->valuestring[0] == 'm') providers_received(result);
@@ -623,8 +731,20 @@ static void enqueue(action_type_t type, const char *id) {
     xSemaphoreGive(state_mutex);
 }
 static void dock_action(const ui_intent_t *intent) {
+    if(intent->type>=UI_QUEUE_OPEN && intent->type!=UI_QUEUE_PLAY) {
+        if(xSemaphoreTake(state_mutex,0)!=pdTRUE) return;
+        if(intent->type==UI_QUEUE_OPEN) active_view=VIEW_QUEUE;
+        if(!queue_loading) {
+            if(intent->type==UI_QUEUE_OPEN) queue_offset=(current_queue_index/UI_QUEUE_PAGE_SIZE)*UI_QUEUE_PAGE_SIZE;
+            if(intent->type==UI_QUEUE_BACK) queue_offset=queue_offset<UI_QUEUE_PAGE_SIZE?0:queue_offset-UI_QUEUE_PAGE_SIZE;
+            if(intent->type==UI_QUEUE_MORE && queue_offset+UI_QUEUE_PAGE_SIZE<queue_total) queue_offset+=UI_QUEUE_PAGE_SIZE;
+            queue_requested=true; queue_dirty=true; screen_dirty=true;
+        }
+        xSemaphoreGive(state_mutex); return;
+    }
     static const action_type_t actions[] = {
-        ACT_PREVIOUS, ACT_PLAY_STOP, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_VOLUME_SET, ACT_SEEK
+        ACT_PREVIOUS, ACT_PLAY_STOP, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_VOLUME_SET, ACT_SEEK,
+        ACT_QUEUE_PLAY, ACT_QUEUE_PLAY, ACT_QUEUE_PLAY, ACT_QUEUE_PLAY, ACT_QUEUE_PLAY
     };
     if (xSemaphoreTake(state_mutex, 0) != pdTRUE) return;
     action_t action = {.type = actions[intent->type], .playing = current_playing,
@@ -667,7 +787,7 @@ static void update_now_playing(void) {
         .transport_pending = commands[PLAYBACK_TRANSPORT].pending,
         .volume_pending = commands[PLAYBACK_VOLUME].pending,
         .seek_pending = commands[PLAYBACK_SEEK].pending,
-        .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live
+        .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live, .can_queue=gateway_can_queue
     };
     controller_ui_update(&ui, &snapshot);
     if (art_result) {
@@ -675,6 +795,11 @@ static void update_now_playing(void) {
         free(art_result); art_result=NULL;
     }
     lv_label_set_text(provider_save_status, provider_feedback);
+}
+static void build_queue_view(void) {
+    controller_ui_queue(&ui,queue_items,queue_count,queue_offset,queue_total,current_item_id,
+        !ready?"Disconnected - reconnect to load":(!gateway_can_queue && queue_count?"Gateway update required to play tracks":queue_message),queue_loading,
+        ready && current_available && gateway_can_queue && !commands[PLAYBACK_TRANSPORT].pending);
 }
 static void build_players_view(void) {
     if (!players_list) return;
@@ -902,7 +1027,15 @@ void app_main(void) {
         }
         action_t action;
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
-        if (screen_dirty || players_dirty || providers_dirty) {
+        request_queue_page();
+        if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+            if(queue_loading && (!ready || esp_timer_get_time()-queue_request_started>10000000LL)) {
+                queue_loading=false; queue_request_id[0]=0; queue_dirty=true; screen_dirty=true;
+                snprintf(queue_message,sizeof(queue_message),"Queue request timed out - tap Refresh");
+            }
+            xSemaphoreGive(state_mutex);
+        }
+        if (screen_dirty || players_dirty || providers_dirty || queue_dirty) {
             screen_dirty = false;
             if (!render()) screen_dirty = true;
         }
@@ -912,6 +1045,9 @@ void app_main(void) {
             if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 expired = commands[group].pending && (!ready || now - commands[group].started > 10000000LL);
                 if (!ready) volume_deferred = false;
+                if(expired && group==PLAYBACK_TRANSPORT) {
+                    snprintf(queue_message,sizeof(queue_message),"Playback unconfirmed - tap Refresh"); queue_dirty=true;
+                }
                 xSemaphoreGive(state_mutex);
             }
             if (expired) { status("Command unconfirmed; refreshing"); finish_command(group); refresh_pending = true; }

@@ -52,6 +52,7 @@ static void move(int x,int y,bool pressed,unsigned ms) {
     advance(ms);
 }
 static void click(lv_obj_t *object) {
+    advance(50);
     lv_area_t area = bounds(object);
     int x = (area.x1 + area.x2)/2, y = (area.y1 + area.y2)/2;
     move(x,y,true,80); move(x,y,false,80);
@@ -94,7 +95,7 @@ static void geometry(void) {
     for(unsigned i=0;i<4;i++) {
         lv_obj_t *caption=lv_obj_get_child(ui.navigation[i],0);
         CHECK(!strcmp(lv_label_get_text(caption),tabs[i])); fixed_caption(caption);
-        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i!=0));
+        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i>1));
         lv_area_t tab=bounds(ui.navigation[i]);
         CHECK(tab.x1==8+(int)i*118 && tab.y1==742);
     }
@@ -124,7 +125,7 @@ int main(int argc,char **argv) {
     ui_playback_t state={.track="Daydreamer",.artist="Adele",.album="19",.player="Extension",
         .status="Connected",.player_id="room-a",.queue_id="queue-a",.item_id="track-a",
         .volume=45,.position=42,.duration=220,.connected=true,.available=true,.playing=true,
-        .can_volume=true,.can_seek=true};
+        .can_volume=true,.can_seek=true,.can_queue=true};
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
     click(ui.transport[0]); CHECK(intent_count==1 && last_intent.type==UI_PREVIOUS);
     click(ui.transport[1]); CHECK(intent_count==2 && last_intent.type==UI_PLAY_STOP);
@@ -216,15 +217,58 @@ int main(int argc,char **argv) {
         state.art_id="mock-album"; controller_ui_update(&ui,&state);
         CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
         unsigned count=intent_count;
-        for(unsigned i=1;i<4;i++) click(ui.navigation[i]);
+        for(unsigned i=2;i<4;i++) click(ui.navigation[i]);
         CHECK(intent_count==count && !lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
         click(ui.player_button); geometry();
         snprintf(name,sizeof(name),"theme-%s-%s-players",themes[p],mode?"light":"dark"); screenshot(name);
         click(ui.settings_button); click(ui.sources_button); geometry();
         snprintf(name,sizeof(name),"theme-%s-%s-sources",themes[p],mode?"light":"dark"); screenshot(name);
     }
+    controller_ui_set_theme(&ui,0,false);
+    click(ui.navigation[1]); CHECK(last_intent.type==UI_QUEUE_OPEN);
+    CHECK(!lv_obj_has_flag(ui.queue_content,LV_OBJ_FLAG_HIDDEN));
+    controller_ui_queue(&ui,NULL,0,0,25,"","Loading queue...",true,false);
+    CHECK(lv_obj_has_state(ui.queue_refresh,LV_STATE_DISABLED)); screenshot("queue-loading"); geometry();
+    ui_queue_item_t rows[UI_QUEUE_PAGE_SIZE]={0};
+    for(unsigned i=0;i<UI_QUEUE_PAGE_SIZE;i++) {
+        snprintf(rows[i].id,sizeof(rows[i].id),"queue-track-%u",i+1);
+        snprintf(rows[i].title,sizeof(rows[i].title),"Track %u",i+1);
+        snprintf(rows[i].artist,sizeof(rows[i].artist),"Adele"); rows[i].duration=220; rows[i].available=true;
+    }
+    snprintf(rows[0].title,sizeof(rows[0].title),"Daydreamer");
+    snprintf(rows[2].title,sizeof(rows[2].title),"A long queue track name that must stay inside its allocated row");
+    rows[3].available=false;
+    state.item_id="queue-track-1"; controller_ui_update(&ui,&state);
+    controller_ui_queue(&ui,rows,20,0,25,state.item_id,"Tap a track to play",false,true);
+    CHECK(ui.queue_count==20 && lv_obj_has_state(ui.queue_back,LV_STATE_DISABLED));
+    CHECK(!lv_obj_has_state(ui.queue_more,LV_STATE_DISABLED));
+    before=intent_count; click(ui.queue_rows[1]);
+    CHECK(intent_count==before+1 && last_intent.type==UI_QUEUE_PLAY);
+    CHECK(!strcmp(last_intent.item_id,"queue-track-2") && !strcmp(last_intent.queue_id,"queue-a"));
+    before=intent_count; click(ui.queue_rows[3]); CHECK(intent_count==before);
+    screenshot("queue-tracks"); geometry();
+    click(ui.queue_more); CHECK(last_intent.type==UI_QUEUE_MORE);
+    controller_ui_queue(&ui,rows,5,20,25,state.item_id,"Tap a track to play",false,true);
+    CHECK(!lv_obj_has_state(ui.queue_back,LV_STATE_DISABLED));
+    CHECK(lv_obj_has_state(ui.queue_more,LV_STATE_DISABLED)); screenshot("queue-last-page"); geometry();
+    click(ui.queue_back); CHECK(last_intent.type==UI_QUEUE_BACK);
+    click(ui.queue_refresh); CHECK(last_intent.type==UI_QUEUE_REFRESH);
+    state.player_id="other-room"; controller_ui_update(&ui,&state);
+    before=intent_count; click(ui.queue_rows[0]); CHECK(intent_count==before);
+    state.player_id="room-a"; state.transport_pending=true; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.queue_rows[0],LV_STATE_DISABLED));
+    state.transport_pending=false; state.connected=false; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.queue_rows[0],LV_STATE_DISABLED)); screenshot("queue-disconnected");
+    state.connected=true; controller_ui_update(&ui,&state);
+    controller_ui_queue(&ui,NULL,0,0,0,"","Queue is empty",false,true); screenshot("queue-empty"); geometry();
+    controller_ui_queue(&ui,NULL,0,0,0,"","Could not load queue - tap Refresh",false,false); screenshot("queue-error"); geometry();
+    for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
+        controller_ui_set_theme(&ui,p,mode);
+        controller_ui_queue(&ui,rows,20,0,25,state.item_id,"Tap a track to play",false,true);
+        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-queue",themes[p],mode?"light":"dark"); screenshot(name); geometry();
+    }
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    printf("PASS: %u layout and interaction checks; 73 screenshots at 480x800\n",checks);
+    printf("PASS: %u layout and interaction checks; 91 screenshots at 480x800\n",checks);
     free(album_packet); free(generic_packet);
     return 0;
 }
