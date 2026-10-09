@@ -252,3 +252,22 @@ flashing the firmware. Flash the full merged firmware image, then the
 existing private NVS image at `0x9000`. The first provider change is saved
 on-device and survives subsequent resets; re-flashing the full merged image
 and NVS resets the choice to the provisioned image's state.
+
+## Provider checkbox reset investigation
+
+On hardware, the provider list loads but tapping a checkbox reportedly blanks
+the screen, returns to Now Playing, and fails to retain the choice. The
+exact reset reason has not yet been captured.
+
+This patch **separates checkbox changes from flash writes**. Tapping a
+checkbox only changes in-memory selection; pressing **Save** explicitly
+persists the selected provider IDs to NVS. A confirmation appears on the
+Providers screen. The firmware logs checkbox transitions and the ESP32 reset
+reason at startup, so a remaining crash can be diagnosed rather than guessed.
+The provider screen remains exclusive and full-screen.
+
+Hardware acceptance: open Providers, uncheck one, confirm the screen remains
+visible, press Save, confirm the success label, return via Back, reopen and
+verify the selection; then press RESET and verify it persists. If the device
+reboots, capture the serial log including `Boot reset reason`, any panic
+backtrace and the final checkbox/save event. Avoid posting device tokens.
