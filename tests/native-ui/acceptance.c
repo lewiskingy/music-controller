@@ -89,6 +89,15 @@ static void geometry(void) {
     lv_area_t dock = bounds(lv_obj_get_parent(ui.transport[0]));
     lv_area_t volume = bounds(lv_obj_get_parent(ui.volume_up));
     CHECK(dock.x1==0 && dock.y1==596 && dock.x2==479 && dock.y2==731);
+    bool wide=!lv_obj_has_flag(ui.browse_content,LV_OBJ_FLAG_HIDDEN) || !lv_obj_has_flag(ui.search_content,LV_OBJ_FLAG_HIDDEN);
+    CHECK(lv_obj_has_flag(lv_obj_get_parent(ui.volume_up),LV_OBJ_FLAG_HIDDEN)==wide);
+    if(wide) {
+        lv_obj_t *pane=!lv_obj_has_flag(ui.browse_content,LV_OBJ_FLAG_HIDDEN)?ui.browse_content:ui.search_content;
+        lv_area_t content=bounds(pane);
+        CHECK(content.x1==0 && content.x2==479 && content.y1==64 && content.y2==595);
+        lv_obj_t *list=pane==ui.browse_content?ui.browse_list:ui.search_list;
+        CHECK(lv_obj_get_width(list)==432);
+    }
     CHECK(volume.x1==400 && volume.y1==64 && volume.x2==479 && volume.y2==595);
     lv_area_t previous=bounds(ui.transport[0]), play=bounds(ui.transport[1]), next=bounds(ui.transport[2]);
     CHECK(previous.x2 < play.x1 && play.x2 < next.x1);
@@ -331,7 +340,7 @@ int main(int argc,char **argv) {
     state.connected=false; controller_ui_update(&ui,&state);
     CHECK(lv_obj_has_state(ui.browse_rows[0],LV_STATE_DISABLED)); screenshot("browse-disconnected"); geometry();
     state.connected=true; controller_ui_update(&ui,&state);
-    /* Search input and keyboard stay inside the content pane; both docks persist. */
+    /* Search uses full width; transport persists and volume is hidden. */
     click(ui.navigation[3]); CHECK(last_intent.type==UI_SEARCH_OPEN);
     CHECK(!lv_obj_has_flag(ui.search_content,LV_OBJ_FLAG_HIDDEN));
     controller_ui_search(&ui,NULL,0,"Navidrome","Enter a title or artist",false,true,200);
@@ -339,7 +348,7 @@ int main(int argc,char **argv) {
     click(ui.search_input); CHECK(!lv_obj_has_flag(ui.search_keyboard,LV_OBJ_FLAG_HIDDEN));
     CHECK(lv_obj_has_flag(ui.search_list,LV_OBJ_FLAG_HIDDEN));
     lv_area_t keyboard=bounds(ui.search_keyboard);
-    CHECK(keyboard.x1>=24 && keyboard.x2<400 && keyboard.y1>=64 && keyboard.y2<596);
+    CHECK(keyboard.x1==0 && keyboard.x2==479 && keyboard.y1>=64 && keyboard.y2<596);
     /* Exercise the real keyboard default handler with its selected key. */
     unsigned key=0;
     while(strcmp(lv_btnmatrix_get_btn_text(ui.search_keyboard,key),"a")) { key++; CHECK(key<100); }
@@ -403,6 +412,16 @@ int main(int argc,char **argv) {
     CHECK(lv_obj_has_state(ui.search_rows[0],LV_STATE_DISABLED));
     controller_ui_search(&ui,NULL,0,"Navidrome","Gateway update required for Search",false,false,210);
     screenshot("search-unsupported"); geometry();
+    /* View transitions restore volume; hidden volume is not a touch target. */
+    state.can_search=true; controller_ui_update(&ui,&state);
+    click(ui.navigation[3]); geometry();
+    before=intent_count; move(440,148,true,80); move(440,148,false,80); CHECK(intent_count==before+1 && last_intent.type==UI_SEARCH_SUBMIT);
+    click(ui.navigation[2]); geometry();
+    click(ui.navigation[1]); geometry();
+    CHECK(!lv_obj_has_flag(lv_obj_get_parent(ui.volume_up),LV_OBJ_FLAG_HIDDEN));
+    click(ui.navigation[0]); geometry();
+    before=intent_count; click(ui.volume_up); CHECK(intent_count==before+1 && last_intent.type==UI_VOLUME_UP);
+    click(ui.settings_button); geometry();
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
     printf("PASS: %u layout and interaction checks; %u screenshots at 480x800\n",checks,screenshots);
     free(album_packet); free(generic_packet);

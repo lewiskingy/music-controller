@@ -233,13 +233,14 @@ static void search_clicked(lv_event_t *event) {
 /* Reusable two-line media row for browse results and other catalogue lists. */
 static lv_obj_t *media_row(lv_obj_t *parent,const char *title,const char *subtitle,
                            const char *marker,lv_event_cb_t callback,controller_ui_t *ui) {
-    lv_obj_t *row=button(parent,"",0,0,352,72,callback,ui);
+    int width=lv_obj_get_width(parent);
+    lv_obj_t *row=button(parent,"",0,0,width,72,callback,ui);
     lv_obj_set_flex_grow(row,0); lv_obj_set_style_pad_all(row,0,0);
     lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE); lv_obj_del(lv_obj_get_child(row,0));
     bg(row,SURFACE,0);
     label(row,marker,8,24,24,ACCENT,false);
-    label(row,title,40,8,300,TEXT,false);
-    label(row,subtitle,40,38,300,MUTED,false);
+    label(row,title,40,8,width-52,TEXT,false);
+    label(row,subtitle,40,38,width-52,MUTED,false);
     return row;
 }
 static lv_obj_t *slider(lv_obj_t *parent, int x, int y, int w, int h, controller_ui_t *ui) {
@@ -361,43 +362,43 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->queue_refresh=button(ui->queue_content,"Refresh",132,452,136,48,queue_clicked,ui);
     ui->queue_more=button(ui->queue_content,"Next",276,452,100,48,queue_clicked,ui);
     ui->queue_feedback=label(ui->queue_content,"Open Queue to load tracks",24,504,352,MUTED,false);
-    ui->browse_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
-    ui->browse_info=label(ui->browse_content,"Music sources",24,20,244,MUTED,false);
-    ui->browse_back=button(ui->browse_content,"Back",280,8,96,48,browse_clicked,ui);
-    ui->browse_play_all=button(ui->browse_content,"Play all",24,52,352,48,browse_clicked,ui);
+    ui->browse_content=panel(root,0,UI_HEADER_HEIGHT,UI_WIDTH,UI_CONTENT_HEIGHT,BG);
+    ui->browse_info=label(ui->browse_content,"Music sources",24,20,324,MUTED,false);
+    ui->browse_back=button(ui->browse_content,"Back",360,8,96,48,browse_clicked,ui);
+    ui->browse_play_all=button(ui->browse_content,"Play all",24,64,432,48,browse_clicked,ui);
     lv_obj_add_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
-    ui->browse_list=panel(ui->browse_content,24,60,352,380,BG);
+    ui->browse_list=panel(ui->browse_content,24,60,432,380,BG);
     lv_obj_add_flag(ui->browse_list,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(ui->browse_list,LV_FLEX_FLOW_COLUMN);
-    ui->browse_previous=button(ui->browse_content,"Previous",24,452,100,48,browse_clicked,ui);
-    ui->browse_refresh=button(ui->browse_content,"Refresh",132,452,136,48,browse_clicked,ui);
-    ui->browse_more=button(ui->browse_content,"Next",276,452,100,48,browse_clicked,ui);
-    ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,352,MUTED,false);
-    ui->search_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
-    ui->search_source=label(ui->search_content,"Choose a music provider in Settings",24,12,352,MUTED,false);
+    ui->browse_previous=button(ui->browse_content,"Previous",24,452,128,48,browse_clicked,ui);
+    ui->browse_refresh=button(ui->browse_content,"Refresh",164,452,140,48,browse_clicked,ui);
+    ui->browse_more=button(ui->browse_content,"Next",316,452,140,48,browse_clicked,ui);
+    ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,432,MUTED,false);
+    ui->search_content=panel(root,0,UI_HEADER_HEIGHT,UI_WIDTH,UI_CONTENT_HEIGHT,BG);
+    ui->search_source=label(ui->search_content,"Choose a music provider in Settings",24,12,432,MUTED,false);
     ui->search_input=lv_textarea_create(ui->search_content);
-    lv_obj_set_pos(ui->search_input,24,48); lv_obj_set_size(ui->search_input,244,56);
+    lv_obj_set_pos(ui->search_input,24,48); lv_obj_set_size(ui->search_input,324,56);
     lv_textarea_set_one_line(ui->search_input,true); lv_textarea_set_max_length(ui->search_input,48);
     lv_textarea_set_placeholder_text(ui->search_input,"Search music");
     bg(ui->search_input,CARD,LV_PART_MAIN); fg(ui->search_input,TEXT,LV_PART_MAIN);
     fg(ui->search_input,MUTED,LV_PART_TEXTAREA_PLACEHOLDER); bg(ui->search_input,ACCENT,LV_PART_CURSOR);
     lv_obj_add_event_cb(ui->search_input,search_clicked,LV_EVENT_FOCUSED,ui);
     lv_obj_add_event_cb(ui->search_input,search_clicked,LV_EVENT_VALUE_CHANGED,ui);
-    ui->search_submit=button(ui->search_content,"Search",276,48,100,56,search_clicked,ui);
+    ui->search_submit=button(ui->search_content,"Search",356,48,100,56,search_clicked,ui);
     ui->search_filter=lv_dropdown_create(ui->search_content);
-    lv_obj_set_pos(ui->search_filter,24,116); lv_obj_set_size(ui->search_filter,352,48);
+    lv_obj_set_pos(ui->search_filter,24,116); lv_obj_set_size(ui->search_filter,432,48);
     lv_dropdown_set_options(ui->search_filter,"Tracks\nAlbums\nArtists\nPlaylists");
     bg(ui->search_filter,CARD,LV_PART_MAIN); fg(ui->search_filter,TEXT,LV_PART_MAIN);
     lv_obj_add_event_cb(ui->search_filter,search_clicked,LV_EVENT_VALUE_CHANGED,ui);
     lv_obj_t *filter_list=lv_dropdown_get_list(ui->search_filter);
     bg(filter_list,SURFACE,LV_PART_MAIN); fg(filter_list,TEXT,LV_PART_MAIN);
     bg(filter_list,ACTIVE,LV_PART_SELECTED); fg(filter_list,TEXT,LV_PART_SELECTED);
-    ui->search_list=panel(ui->search_content,24,176,352,316,BG);
+    ui->search_list=panel(ui->search_content,24,176,432,316,BG);
     lv_obj_add_flag(ui->search_list,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(ui->search_list,LV_FLEX_FLOW_COLUMN);
     ui->search_keyboard=lv_keyboard_create(ui->search_content);
     lv_obj_set_align(ui->search_keyboard,LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(ui->search_keyboard,24,116); lv_obj_set_size(ui->search_keyboard,352,376);
+    lv_obj_set_pos(ui->search_keyboard,0,116); lv_obj_set_size(ui->search_keyboard,UI_WIDTH,376);
     lv_keyboard_set_textarea(ui->search_keyboard,ui->search_input);
     bg(ui->search_keyboard,BG,LV_PART_MAIN); bg(ui->search_keyboard,CARD,LV_PART_ITEMS);
     fg(ui->search_keyboard,TEXT,LV_PART_ITEMS); bg(ui->search_keyboard,ACTIVE,LV_PART_ITEMS|LV_STATE_PRESSED);
@@ -406,7 +407,7 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_add_event_cb(ui->search_keyboard,search_clicked,LV_EVENT_READY,ui);
     lv_obj_add_event_cb(ui->search_keyboard,search_clicked,LV_EVENT_CANCEL,ui);
     lv_obj_add_flag(ui->search_keyboard,LV_OBJ_FLAG_HIDDEN);
-    ui->search_feedback=label(ui->search_content,"Enter a title or artist",24,504,352,MUTED,false);
+    ui->search_feedback=label(ui->search_content,"Enter a title or artist",24,504,432,MUTED,false);
     ui->settings_content = panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     label(ui->settings_content,"Colour palette",24,20,352,TEXT,true);
     for(unsigned i=0;i<6;i++) {
@@ -426,6 +427,9 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     controller_ui_show(ui, UI_PLAYING);
 }
 void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
+    lv_obj_t *volume_dock=lv_obj_get_parent(ui->volume_up);
+    if(view==UI_BROWSE || view==UI_SEARCH) lv_obj_add_flag(volume_dock,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(volume_dock,LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content, ui->browse_content, ui->search_content};
     for (unsigned i = 0; i < 7; ++i) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
@@ -596,7 +600,7 @@ void controller_ui_browse(controller_ui_t *ui, const ui_media_item_t *items, uns
     bool album=parent_uri && parent_uri[0];
     if(album) lv_obj_clear_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ui->browse_play_all,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_pos(ui->browse_list,24,album?112:60); lv_obj_set_height(ui->browse_list,album?328:380);
+    lv_obj_set_pos(ui->browse_list,24,album?124:60); lv_obj_set_height(ui->browse_list,album?316:380);
     ui->browse_album=ui->current; ui->browse_album.generation=generation;
     snprintf(ui->browse_album.media_uri,sizeof(ui->browse_album.media_uri),"%s",album?parent_uri:"");
     enabled(ui->browse_play_all,!loading && can_play && album);
