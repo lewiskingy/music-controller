@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "controller_ui.h"
+#include "search_keyboard_font.h"
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #endif
@@ -193,8 +194,36 @@ static void browse_clicked(lv_event_t *event) {
         send_intent(ui,ui->browse_kinds[i]==UI_MEDIA_TRACK?UI_BROWSE_PLAY:UI_BROWSE_SELECT,(int)i,&ui->browse_targets[i]); break;
     }
 }
+/* Search needs letters, not case modes. Both maps keep the same edit controls. */
+static const char *search_letters[]={
+    "q","w","e","r","t","y","u","i","o","p","\n",
+    "a","s","d","f","g","h","j","k","l","\n",
+    "z","x","c","v","b","n","m","\n",
+    "Symbols","Space",LV_SYMBOL_BACKSPACE,"Search",""};
+static const char *search_symbols[]={
+    "1","2","3","4","5","6","7","8","9","0","\n",
+    "£","$","#","&","'","-",".",",","/","\n",
+    "!","?","(",")","+","@",":","\n",
+    "Letters","Space",LV_SYMBOL_BACKSPACE,"Search",""};
+static const lv_btnmatrix_ctrl_t search_key_controls[]={
+    1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS|3,LV_KEYBOARD_CTRL_BTN_FLAGS|5,2,LV_KEYBOARD_CTRL_BTN_FLAGS|3};
+static void search_key_pressed(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_t *keyboard=lv_event_get_target(event);
+    const char *key=lv_btnmatrix_get_btn_text(keyboard,lv_btnmatrix_get_selected_btn(keyboard));
+    if(!key) return;
+    if(!strcmp(key,"Symbols")) lv_keyboard_set_mode(keyboard,LV_KEYBOARD_MODE_USER_2);
+    else if(!strcmp(key,"Letters")) lv_keyboard_set_mode(keyboard,LV_KEYBOARD_MODE_USER_1);
+    else if(!strcmp(key,"Space")) lv_textarea_add_char(ui->search_input,' ');
+    else if(!strcmp(key,"Search")) lv_event_send(keyboard,LV_EVENT_READY,NULL);
+    else lv_keyboard_def_event_cb(event);
+}
 static void search_input_mode(controller_ui_t *ui,bool editing) {
     if(editing) {
+        lv_keyboard_set_mode(ui->search_keyboard,LV_KEYBOARD_MODE_USER_1);
         lv_obj_clear_flag(ui->search_keyboard,LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(ui->search_list,LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(ui->search_filter,LV_OBJ_FLAG_HIDDEN);
@@ -376,8 +405,10 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,432,MUTED,false);
     ui->search_content=panel(root,0,UI_HEADER_HEIGHT,UI_WIDTH,UI_CONTENT_HEIGHT,BG);
     ui->search_source=label(ui->search_content,"Choose a music provider in Settings",24,12,432,MUTED,false);
+    search_text_font=lv_font_montserrat_18; search_text_font.fallback=&search_pound_font;
     ui->search_input=lv_textarea_create(ui->search_content);
     lv_obj_set_pos(ui->search_input,24,48); lv_obj_set_size(ui->search_input,324,56);
+    lv_obj_set_style_text_font(ui->search_input,&search_text_font,0);
     lv_textarea_set_one_line(ui->search_input,true); lv_textarea_set_max_length(ui->search_input,48);
     lv_textarea_set_placeholder_text(ui->search_input,"Search music");
     bg(ui->search_input,CARD,LV_PART_MAIN); fg(ui->search_input,TEXT,LV_PART_MAIN);
@@ -399,7 +430,13 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->search_keyboard=lv_keyboard_create(ui->search_content);
     lv_obj_set_align(ui->search_keyboard,LV_ALIGN_TOP_LEFT);
     lv_obj_set_pos(ui->search_keyboard,0,116); lv_obj_set_size(ui->search_keyboard,UI_WIDTH,376);
+    lv_obj_set_style_text_font(ui->search_keyboard,&search_text_font,LV_PART_ITEMS);
     lv_keyboard_set_textarea(ui->search_keyboard,ui->search_input);
+    lv_keyboard_set_map(ui->search_keyboard,LV_KEYBOARD_MODE_USER_1,search_letters,search_key_controls);
+    lv_keyboard_set_map(ui->search_keyboard,LV_KEYBOARD_MODE_USER_2,search_symbols,search_key_controls);
+    lv_keyboard_set_mode(ui->search_keyboard,LV_KEYBOARD_MODE_USER_1);
+    lv_obj_remove_event_cb(ui->search_keyboard,lv_keyboard_def_event_cb);
+    lv_obj_add_event_cb(ui->search_keyboard,search_key_pressed,LV_EVENT_VALUE_CHANGED,ui);
     bg(ui->search_keyboard,BG,LV_PART_MAIN); bg(ui->search_keyboard,CARD,LV_PART_ITEMS);
     fg(ui->search_keyboard,TEXT,LV_PART_ITEMS); bg(ui->search_keyboard,ACTIVE,LV_PART_ITEMS|LV_STATE_PRESSED);
     bg(ui->search_keyboard,CARD,LV_PART_ITEMS|LV_STATE_CHECKED); fg(ui->search_keyboard,TEXT,LV_PART_ITEMS|LV_STATE_CHECKED);

@@ -61,6 +61,14 @@ static void click(lv_obj_t *object) {
     int x = (area.x1 + area.x2)/2, y = (area.y1 + area.y2)/2;
     move(x,y,true,80); move(x,y,false,80);
 }
+static void press_search_key(const char *text) {
+    unsigned key=0;
+    const char *candidate;
+    while((candidate=lv_btnmatrix_get_btn_text(ui.search_keyboard,key)) && strcmp(candidate,text)) key++;
+    CHECK(candidate!=NULL);
+    lv_btnmatrix_set_selected_btn(ui.search_keyboard,key);
+    lv_event_send(ui.search_keyboard,LV_EVENT_VALUE_CHANGED,NULL);
+}
 /* Internal list scrolling is intentional. Everything outside scrolling content
    must fit inside its parent and the physical framebuffer. */
 static void no_clipping(lv_obj_t *object,bool inside_scroll) {
@@ -349,15 +357,29 @@ int main(int argc,char **argv) {
     CHECK(lv_obj_has_flag(ui.search_list,LV_OBJ_FLAG_HIDDEN));
     lv_area_t keyboard=bounds(ui.search_keyboard);
     CHECK(keyboard.x1==0 && keyboard.x2==479 && keyboard.y1>=64 && keyboard.y2<596);
-    /* Exercise the real keyboard default handler with its selected key. */
-    unsigned key=0;
-    while(strcmp(lv_btnmatrix_get_btn_text(ui.search_keyboard,key),"a")) { key++; CHECK(key<100); }
-    lv_btnmatrix_set_selected_btn(ui.search_keyboard,key);
-    lv_event_send(ui.search_keyboard,LV_EVENT_VALUE_CHANGED,NULL);
-    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a") && last_intent.type==UI_SEARCH_EDIT);
+    /* Only letters and four edit controls appear in the default map. */
+    for(unsigned key=0;lv_btnmatrix_get_btn_text(ui.search_keyboard,key);key++) {
+        const char *text=lv_btnmatrix_get_btn_text(ui.search_keyboard,key);
+        CHECK((strlen(text)==1 && text[0]>='a' && text[0]<='z') || !strcmp(text,"Symbols") ||
+            !strcmp(text,"Space") || !strcmp(text,LV_SYMBOL_BACKSPACE) || !strcmp(text,"Search"));
+    }
+    press_search_key("a"); CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a") && last_intent.type==UI_SEARCH_EDIT);
+    press_search_key("Symbols"); CHECK(lv_keyboard_get_mode(ui.search_keyboard)==LV_KEYBOARD_MODE_USER_2);
+    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a"));
+    press_search_key("Space"); press_search_key("$"); press_search_key("#"); press_search_key("£");
+    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a $#£"));
+    lv_font_glyph_dsc_t glyph;
+    CHECK(lv_font_get_glyph_dsc(lv_obj_get_style_text_font(ui.search_keyboard,LV_PART_ITEMS),&glyph,0xa3,0) && !glyph.is_placeholder);
+    screenshot("search-symbols-keyboard"); geometry();
+    press_search_key(LV_SYMBOL_BACKSPACE); CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a $#"));
+    press_search_key("1"); press_search_key("9"); press_search_key("7"); press_search_key("5");
+    press_search_key("'"); press_search_key("-"); press_search_key("."); press_search_key(",");
+    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a $#1975'-.,"));
+    press_search_key("Letters"); CHECK(lv_keyboard_get_mode(ui.search_keyboard)==LV_KEYBOARD_MODE_USER_1);
+    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a $#1975'-.,"));
     lv_textarea_set_text(ui.search_input,"Adele");
     screenshot("search-keyboard"); geometry();
-    lv_event_send(ui.search_keyboard,LV_EVENT_READY,NULL);
+    press_search_key("Search");
     CHECK(last_intent.type==UI_SEARCH_SUBMIT && !strcmp(last_intent.query,"Adele") && last_intent.value==0);
     CHECK(lv_obj_has_flag(ui.search_keyboard,LV_OBJ_FLAG_HIDDEN));
     controller_ui_search(&ui,NULL,0,"Navidrome","Searching...",true,false,201);
