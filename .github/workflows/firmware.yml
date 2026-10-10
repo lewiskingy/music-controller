@@ -4,15 +4,68 @@ on:
     paths:
       - 'firmware/esp32/**'
       - '.github/workflows/firmware.yml'
+      - 'tests/native-ui/**'
+      - 'tests/test_playback_policy.py'
+      - 'tests/test_esp32_focus_controls.py'
+      - 'tests/test_esp32_providers_volume.py'
+      - 'tests/test_esp32_provider_save.py'
   push:
     branches: [main]
     paths:
       - 'firmware/esp32/**'
       - '.github/workflows/firmware.yml'
+      - 'tests/native-ui/**'
+      - 'tests/test_playback_policy.py'
+      - 'tests/test_esp32_focus_controls.py'
+      - 'tests/test_esp32_providers_volume.py'
+      - 'tests/test_esp32_provider_save.py'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Verify playback policy and native UI contracts
+        run: python -m pytest -q tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
+  ui-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the firmware's pinned LVGL version
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v8.3.11
+          path: .test-deps/lvgl
+      - name: Build native firmware UI simulator
+        run: |
+          cmake -S tests/native-ui -B build/native-ui -DLVGL_SOURCE_DIR="$GITHUB_WORKSPACE/.test-deps/lvgl"
+          cmake --build build/native-ui -j2
+      - name: Exercise layout and interactions; capture framebuffers
+        run: |
+          mkdir -p artifacts/native-ui
+          set -o pipefail
+          python tests/native-ui/mock_artwork.py build/mock-artwork
+          build/native-ui/ui_acceptance artifacts/native-ui build/mock-artwork 2>&1 | tee artifacts/native-ui/acceptance.log
+      - name: Convert captured screenshots to PNG
+        if: always()
+        run: python tests/native-ui/convert_screenshots.py artifacts/native-ui
+      - name: Upload native UI acceptance screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-controller-ui-screenshots-${{ github.sha }}
+          path: |
+            artifacts/native-ui/*.png
+            artifacts/native-ui/acceptance.log
+          if-no-files-found: warn
+          retention-days: 30
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.4.2

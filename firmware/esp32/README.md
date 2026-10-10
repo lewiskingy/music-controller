@@ -271,3 +271,194 @@ visible, press Save, confirm the success label, return via Back, reopen and
 verify the selection; then press RESET and verify it persists. If the device
 reboots, capture the serial log including `Boot reset reason`, any panic
 backtrace and the final checkbox/save event. Avoid posting device tokens.
+
+## Rich portrait UI — first component increment
+
+The `feature/rich-portrait-ui` branch implements the first native LVGL design
+increment from `docs/design/music-controller-design.html`. It replaces the
+landscape screen compositions with one 480×800 shell: header (64 px), content
+(468 px), shared playback dock (200 px at y=532), navigation (68 px at y=732).
+Only content panes switch; the same dock objects remain mounted for Now
+Playing, Players and Providers. Lists scroll inside content.
+
+`controller_ui.c/.h` owns shared colours, sizing, labels, buttons, selection
+row styles, artwork placeholder and dock rendering. It has no network or NVS
+dependencies; the application passes a selected-player snapshot and receives
+action callbacks. `playback_policy.h` owns the host-testable Play/Stop and
+5% volume command policy.
+
+The centre control sends Stop while playing, Play otherwise, including paused
+players. There is no Pause or fourth Stop button. Commands capture the selected
+player and visible state at tap time, are queued off the LVGL task, and reject
+a changed/unavailable target rather than controlling a newly selected room.
+One pending command disables the dock until its correlated acknowledgement,
+send failure, disconnect or a 10-second timeout. Playback and volume remain
+authoritative Music Assistant state.
+
+The BSP's `CONFIG_LVGL_PORT_ROTATION_90=y` rotates rendering and GT911 touch
+coordinates together; no second application-level rotation is applied. The
+BSP 1.0.7 source exposes this option and uses three RGB framebuffers for
+rotation; allow roughly 2.2 MiB for those buffers before other allocations.
+Physical orientation, touch alignment and available PSRAM still require
+validation on the actual board. Use a clean SDK configuration or set the same
+rotation choice in menuconfig when reusing an existing build directory.
+
+This historical first increment retained +/- volume controls. The revised
+docks below supersede that geometry and add a vertical volume slider. Navigation exposes only the
+implemented Playing, Sources and Players views. Queue/Browse/Search and real
+artwork follow later; no placeholder navigation claims those features work.
+Provider selection is exclusive; explicit Save persists the single choice.
+
+### Validation and device acceptance
+
+Run `python -m pytest tests/test_playback_policy.py tests/test_esp32_focus_controls.py
+tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py` for the
+command policy and integration contracts. CI builds against ESP-IDF 5.4.2 and
+LVGL 8.3.11. A passing build is not hardware acceptance.
+
+After CI succeeds, flash the workflow's merged image at 0x0, then restore
+your existing private NVS image at 0x9000 as described above. Verify:
+
+- Portrait layout and touch alignment at all four corners; no shell scrolling.
+- Real track/player metadata and identical dock position on all three views.
+- Previous, Play/Stop, Next and volume on each view; repeated taps do not
+  submit duplicate commands while pending.
+- Sonos Play after Stop (resume/restart semantics are provider-dependent).
+- Player changes, unavailable players, reconnects and rejected commands.
+- Provider radio choice/Save operation and persistence after RESET.
+- Stable memory, no resets, and responsive touch while gateway responses arrive.
+
+Skip/volume capability metadata is not yet modelled by the existing adapter;
+unsupported commands report gateway errors. Artwork decoding, full browsing
+and keyboard layout remain later increments.
+
+## Revised docks and seek timeline — design v1.1
+
+The current feature branch implements the revised shell from the design
+reference: 400×532 content at (0,64), persistent 80×532 VolumeDock at
+(400,64), full-width 480×136 TransportDock at (0,596), and navigation at
+y=732. Now Playing, Players and Providers share the same two dock instances.
+Both selection lists now fit the narrower pane.
+
+VolumeDock has a vertical 0–100% slider with a 48 px-wide touch target and
+56×56 +/- buttons retaining the existing 5% boundary stepping. Slider drag
+values are previews (marked ~), sent no more often than every 300 ms; the
+final release value is retained even while an earlier command is pending.
+Pending volume updates are coalesced to the latest value, never a backlog
+of obsolete intermediate positions. A * marks unconfirmed volume. Reported
+Music Assistant volume remains authoritative. Volume controls require the
+player's explicit `volume_set` capability.
+
+Now Playing adds album metadata and a seek timeline with elapsed/duration
+labels. Queue position is interpolated locally once a second while playing,
+using elapsed_time, its timestamp and playback_speed from queue snapshots.
+The UI freezes the gesture's player/queue/item identity, previews time locally
+and submits one `player_queues/seek` on release. Lost presses cancel; stale
+track/player gestures are rejected. Positions clamp within the current track,
+ending one second before duration to avoid advancing the queue.
+
+Seeking requires a finite duration up to seven days, active queue, stable
+queue item identity, non-live media, no explicit stream `allow_seek=false`,
+and gateway support. Live radio/audio sources show Live; unknown duration
+shows --:-- with a disabled timeline. Transport, volume and seek have separate
+acknowledgement/timeout slots, so seeking does not disable volume or browsing.
+A pending transport command disables seeking to avoid a skip/seek conflict.
+
+**Companion Atlas gateway deployment required for seek:** the gateway now
+allows integer-second `player_queues/seek` and advertises support through
+`gateway/capabilities` with `data.seek=true`. On an older gateway, transport
+and volume continue working and seeking remains disabled. No credentials or
+NVS changes are required. The installed MA version still needs device
+validation for active queue/stream fields and Sonos seek behaviour.
+
+Hardware acceptance: check both slider directions and enlarged hit targets,
+5% stepping at non-multiples (12→15 / 12→10), dragging volume during playback,
+seek preview/release on a finite track, track or room changes during dragging,
+radio/unknown-duration disabling, gateway failures/timeouts and reconnect.
+Real album artwork and remaining Queue/Browse/Search screens are still deferred.
+
+## Native LVGL acceptance screenshots
+
+The firmware CI `ui-acceptance` job builds the actual `controller_ui.c`
+against LVGL 8.3.11 on Linux. A headless display driver captures 480×800 RGB
+framebuffers; no HTML rendering, SDL, physical board or Music Assistant is
+required. A simulated LVGL pointer drives transport/navigation buttons and
+slider gestures. Deterministic fixtures cover all three implemented views,
+seek preview/pending, stopped, radio, long metadata, disconnected and
+unavailable states.
+
+Assertions check dock coordinates, transport order, minimum volume button
+size, non-scrolling shell, geometry containment outside intentionally
+scrolling lists, emitted intents, seek-on-release, stale gesture cancellation
+and disabled controls. Metadata labels have bounded heights to avoid
+expansion into adjacent controls. These are UI/component acceptance tests,
+not a complete gateway or hardware integration simulation.
+
+Each run uploads `music-controller-ui-screenshots-<commit>` with PNGs and
+`acceptance.log`, including screenshots already captured if a later check
+fails. No visual golden baseline is imposed yet. Physical rotation, GT911
+alignment, PSRAM and actual player behaviour remain hardware checks.
+
+Local execution with an LVGL v8.3.11 checkout:
+
+```bash
+cmake -S tests/native-ui -B build/native-ui -DLVGL_SOURCE_DIR=/absolute/path/to/lvgl
+cmake --build build/native-ui -j2
+mkdir -p artifacts/native-ui
+build/native-ui/ui_acceptance artifacts/native-ui
+python tests/native-ui/convert_screenshots.py artifacts/native-ui
+```
+
+### Appearance and staged navigation
+
+The header cog opens appearance settings. Six palettes (Green, Blue, Red, Orange, Purple, Grey) each support Dark and Light modes. Shared semantic LVGL styles apply to existing controls and newly created player/source rows. Selection is stored as `ui_palette` and `ui_light` in the `controller` NVS namespace and restored on boot. Invalid palette values fall back to Green.
+
+The bottom tabs match the design: Playing, Queue, Browse, Search. All four tabs are functional. Use the header player selector for Players and Settings → Music provider for provider selection.
+
+Native acceptance checks all twelve theme selections and their persistence callbacks once, with a single settings/edit example. Screenshots focus on functional states; theme permutations are no longer captured on every screen. Checks retain fixed-caption fit, navigation, disabled interactions and persistent dock geometry.
+
+### Gateway-served album artwork
+
+The companion Atlas gateway advertises `artwork_rgb565` and annotates current queue items with `controller_art_id`. Firmware fetches `/device/artwork/{id}` from the same provisioned gateway using the existing device token in a dedicated worker. A complete validated MCAR packet contains a 288 × 288 little-endian RGB565 cover. PSRAM holds the transfer and reusable display buffers; the 40 × 40 dock thumbnail is derived locally. Downloads never hold LVGL locks. Results are discarded after a player, queue, track or artwork change. Same-album artwork is reused. Artwork retains its original colours under every theme.
+
+The gateway supplies a generic record cover for absent or failed provider art. An unreachable/older gateway leaves the local placeholder visible, without affecting playback controls. Companion changes are in Atlas PR #614.
+
+Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks both artwork slots, malformed/truncated packets, stale responses and artwork changes; functional screenshots include real-cover fixtures and generic covers.
+
+### Queue
+
+Queue is enabled in the bottom navigation. It opens the page containing the selected player's current queue index, loads at most 20 tracks, highlights the current item, and shows artist and duration. Previous/Next page controls bound memory; Refresh retries the current page. Loading, empty, API error, timeout, disconnected, unavailable-track and older-gateway states are explicit. Search is enabled.
+
+Tap-to-play sends `player_queues/play_index` with the stable queue item ID as `index`, not a numeric position. The companion gateway advertises `queue_item_play` and validates either form. Removed items fail through the API rather than playing a replacement at the same position. Responses match request ID, player, queue and offset; row taps capture player/queue/item identity. Playback remains authoritative and transport pending/ACK/timeout handling is reused.
+
+Acceptance includes mocked queue loading, 20-item pages, last page, row playback, disabled/unavailable rows, stale player targets, errors, disconnection and functional Queue screenshots. Gateway contract tests cover stable IDs and bounded pagination.
+
+### Browse
+
+Browse starts with the selected music sources, then Albums, Artists, Playlists and Provider folders. Artists open albums; albums and playlists open tracks. Track taps and Play all send `player_queues/play_media` with the stable media URI and `option: replace` to the captured selected queue. This replaces that queue; selecting a source never switches the output player.
+
+A shared two-line media row and the persistent transport/volume docks serve Queue and Browse. Pages hold at most 20 items, navigation is bounded to eight contexts, and Back, Refresh and page controls stay inside the content pane. Request IDs and navigation generations reject stale responses. Loading, empty, disconnected, unsupported-gateway, unavailable-item, API-error and ten-second timeout states are explicit. Playback taps also validate the selected player and queue.
+
+The gateway advertises `browse` and translates `controller/browse` into fixed Music Assistant read commands, returning compact metadata. Library categories filter the selected provider; Provider folders exposes its native browse hierarchy where supported. This requires the companion Atlas feature branch. Search uses the same compact rows and detail navigation.
+
+Native acceptance captures functional Browse sources, categories, albums, artists, playlists, tracks, folders and failure states, without repeating each screen for every palette. Gateway acceptance includes a real device WebSocket against a mocked Music Assistant upstream, partial responses, provider identity and bounded pagination. Physical touch and live-provider validation remain pending.
+
+### Search and exclusive provider selection
+
+Search is functional in the fourth navigation tab. Choose a provider in Settings → Music provider; exactly one row is selected, and tapping it again cannot clear the choice. Save persists the single provider using the existing `music_sources` NVS key. Legacy multi-selection is normalized to the first available matching provider; a missing or absent saved provider selects the first discovered source. Selecting a provider clears pending Browse/Search pages, leaves the output player unchanged and requires Save to persist across reboot.
+
+Search accepts up to 48 Unicode characters and offers Tracks, Albums, Artists and Playlists. Tap Search or the keyboard Search key to submit; typing and changing the type invalidate results immediately without sending per-keystroke requests. Search and Browse use the full 480px content width and hide volume. The 480px-wide keyboard replaces the results/filter area while preserving the bottom transport dock. Dismissing it reveals results. Track taps replace the selected queue; other results open the existing Browse details, with Back returning to the retained Search results.
+
+The authenticated gateway `controller/search` adapter searches only the chosen provider/type, asks for 21 results and retains at most 20 compact rows. A sentinel triggers “First 20 results - refine your search”; there is no unbounded search pagination. Request ID, generation and provider checks reject obsolete responses. Playback captures player, queue and stable media URI. Empty input/results, unavailable items, API errors, disconnect, unsupported gateway and ten-second timeout states are explicit. Retry with Search.
+
+Current Music Assistant `music/search` accepts `providers: [id]`. For older versions that explicitly reject that argument, the gateway retries once with the selected provider's filtered `music/{type}/library_items` search. This remains scoped to that provider's indexed library and the UI labels “Library results”; it never falls back to global multi-provider search. Provider-native support and hardware typing comfort still require live validation.
+
+Acceptance now produces 46 functional screenshots, including Search input, keyboard, four result types, loading, empty, error, timeout, disconnected and unsupported states. The native suite also verifies stable playback targets, stale results, immediate edit invalidation, keyboard submission, exclusive provider clicks and theme callbacks. Theme choices are exercised once without a screenshot matrix. Gateway tests include actual WebSocket search/playback against a mocked Music Assistant, bounded partial responses and the older-server fallback.
+
+### View-dependent volume dock
+
+Browse and Search hide the right VolumeDock and expand their content panes to 480 × 532. Lists and content controls use 432px width with 24px side margins. Search's keyboard spans the entire display width (x=0, width=480), including the space previously used for volume. The bottom transport dock and navigation retain their positions. Playing, Queue, Settings, Players and Providers restore the existing volume dock. Acceptance checks dock visibility and restoration, full-width content and keyboard bounds, wide list rows, and unchanged transport geometry. The existing 45 functional screenshot set is retained.
+
+### Simplified Search keyboard
+
+The full-width default map contains lowercase letters only, plus Symbols, Space, Backspace and Search. Symbols switches to digits 0–9 and £ $ # & apostrophe, hyphen, period, comma, slash, ! ? parentheses, + @ and colon; Letters returns to the alphabet without losing text. No case toggles or cursor-arrow keys are shown. Reopening the keyboard starts with letters. The gateway applies Unicode casefold to submitted queries and to the older-server library fallback, retaining punctuation. The stock font is supplemented with an original pound-sign glyph so £ renders in both the keyboard and input. Acceptance covers symbol entry, UTF-8 backspace, mode switching, Search submission and case-normalized gateway requests; screenshots total 46.

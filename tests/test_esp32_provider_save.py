@@ -11,7 +11,7 @@ def test_checkbox_change_does_not_write_flash():
 def test_explicit_save_and_feedback():
     assert "ACT_PROVIDER_SAVE" in SOURCE
     assert "save_providers_clicked" in SOURCE
-    assert 'lv_label_set_text(save_text, "Save")' in SOURCE
-    assert 'lv_label_set_text(provider_save_status, "Selection saved")' in SOURCE
+    assert '"Save", 232, 434, 144, 56, save_cb' in (Path(__file__).resolve().parents[1] / "firmware/esp32/main/controller_ui.c").read_text()
+    assert 'snprintf(provider_feedback, sizeof(provider_feedback), "Selection saved")' in SOURCE
     assert 'nvs_commit(n)' in SOURCE
     assert 'esp_reset_reason()' in SOURCE
