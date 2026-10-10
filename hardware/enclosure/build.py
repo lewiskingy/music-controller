@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 import cadquery as cq
 import numpy as np
-from geometry import parts, assembled_parts, manufacturer_to_case, case_to_dock, dock, DEPTH, H
+from geometry import parts, assembled_parts, manufacturer_to_case, case_to_dock, dock, DEPTH, H, MAX_DEPTH
 from render import read_stl, render_all
 
 ROOT=Path(__file__).resolve().parent
@@ -81,13 +81,13 @@ def main():
     cq.exporters.export(docked,str(out/'docked_assembly.step'))
     dock_volume=sum(case_to_dock(p).val().intersect(dock.val()).Volume() for p in assembled.values())
     if dock_volume>1e-4: raise ValueError(f'Case collides with dock: {dock_volume} mm3')
-    (out/'dock_fit_check.json').write_text(json.dumps({'collision_volume_mm3':round(dock_volume,6),'portrait_case_mm':[80,H,DEPTH]},indent=2)+'\n')
+    (out/'dock_fit_check.json').write_text(json.dumps({'collision_volume_mm3':round(dock_volume,6),'portrait_case_mm':[80,H,DEPTH], 'max_battery_depth_mm':MAX_DEPTH},indent=2)+'\n')
     (out/'mesh_check.json').write_text(json.dumps(checks,indent=2)+'\n')
     if args.check_board or args.board_archive: check_board(out,args.board_archive)
     render_all(out)
     for name in ('ASSEMBLY.md','README.md','geometry.py','build.py','render.py','test_geometry.py','requirements.txt'):
         shutil.copyfile(ROOT/name,out/name)
-    (out/'README.md').write_text((out/'README.md').read_text().replace('previews/assembled.png','assembled.png'))
+    (out/'README.md').write_text((out/'README.md').read_text().replace('previews/',''))
     shutil.copytree(ROOT/'reference',out/'reference',dirs_exist_ok=True)
     (out/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out)}\n' for p in sorted(out.rglob('*')) if p.is_file() and p.name not in ('SHA256SUMS','print-package.zip','print-package.zip.sha256')))
     with zipfile.ZipFile(out/'print-package.zip','w',zipfile.ZIP_DEFLATED) as archive:

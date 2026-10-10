@@ -6,13 +6,15 @@ Mechanical design for the **original Waveshare ESP32-S3-Touch-LCD-4.3**, with sp
 
 ![Assembled enclosure and dock](previews/assembled.png)
 
+![Raised rear battery compartment](previews/rear.png)
+
 ## Branch scope
 
 This hardware branch targets `main` independently of PR20 (`feature/rich-portrait-ui`). It does not contain the portrait firmware changes. The mechanical orientation supports the portrait UI; firmware rotation and touch alignment still need device acceptance.
 
 ## Source and deliverables
 
-- `geometry.py`: editable CadQuery source for the front, rear extension, rear cover, battery tray, contact/blank inserts and keyed upright portrait dock. Dimensions are in mm. The enclosure is 80 × 138 × 39 mm, including a lower USB pigtail/cable bay. Rear supports bear on metal mounting bosses; no separate board spacers are required.
+- `geometry.py`: editable CadQuery source for the front, rear extension, rear cover, battery tray, contact/blank inserts and keyed upright portrait dock. Dimensions are in mm. The enclosure is 80 × 138 × 28 mm, with a local battery compartment reaching 39 mm, including a lower USB pigtail/cable bay. Rear supports bear on metal mounting bosses; no separate board spacers are required.
 - `build.py`: exports STL/STEP files, checks solid validity and closed meshes, checks case-to-dock clearance and optionally checks clearance against the manufacturer STEP, renders PNGs and packages files with checksums.
 - `render.py`: headless software depth-buffer renderer using actual STL geometry; no GPU, desktop, Blender or display server required.
 - [ASSEMBLY.md](ASSEMBLY.md): documented dimensions, print-service instructions, assembly and optional charging hardware/wiring.
@@ -55,4 +57,4 @@ Official archive: https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-
 
 Archive SHA-256: `8721fac43de47b35771c438829a3251a4c0723227d83696b5517efe7d854de15`
 
-Archive contains `esp32-s3-touch-lcd-4_3.stp`, dated 2023-12-13, with 693 solids. Mounting pattern 98 × 60 mm; model's total depth 16.90 mm. Measured details are in ASSEMBLY.md. The portrait enclosure is 80 × 138 × 39 mm. The tray assumes an approximately 40 × 34 × 10 mm pack and provides a 44 × 38 × 12 mm cavity.
+Archive contains `esp32-s3-touch-lcd-4_3.stp`, dated 2023-12-13, with 693 solids. Mounting pattern 98 × 60 mm; model's total depth 16.90 mm. Measured details are in ASSEMBLY.md. The portrait enclosure is 80 × 138 × 28 mm, with a local battery compartment reaching 39 mm. The rounded 54 × 48 mm battery compartment projects 11 mm beyond the main back. Its centre is X=+4, Y=−12, towards the lower battery-header region; the dock supports the case either side of this compartment. Case corner radius is 6 mm, with 0.8 mm exposed edge rounding. The tray assumes an approximately 40 × 34 × 10 mm pack and provides a 44 × 38 × 12 mm cavity.

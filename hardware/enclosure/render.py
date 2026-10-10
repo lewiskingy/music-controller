@@ -2,7 +2,7 @@
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
-from geometry import BOARD_Y, H, DEPTH, CONTACT_INSERT_Z, DOCK_FLOOR
+from geometry import BOARD_Y, H, DEPTH, CONTACT_INSERT_Z, DOCK_FLOOR, FRONT_DEPTH, MAX_DEPTH
 
 
 def read_stl(path):
@@ -37,7 +37,9 @@ def rasterize(items, eye, size=(1000, 850)):
         coords[:,:,1] = height/2 - (coords[:,:,1]-centre[1])*scale
         normal = np.cross(vertices[:,1]-vertices[:,0], vertices[:,2]-vertices[:,0])
         normal /= np.maximum(np.linalg.norm(normal,axis=1)[:,None],1e-12)
-        shades = .55+.45*np.maximum(normal @ light, 0)
+        # Preview coordinate reflections reverse winding; shade the visible side.
+        normal *= np.where(normal[:,2] < 0, -1, 1)[:,None]
+        shades = .40+.60*np.maximum(normal @ light, 0)
         for tri, shade in zip(coords, shades):
             x0=max(0,int(np.floor(tri[:,0].min()))); x1=min(width-1,int(np.ceil(tri[:,0].max())))
             y0=max(0,int(np.floor(tri[:,1].min()))); y1=min(height-1,int(np.ceil(tri[:,1].max())))
@@ -60,8 +62,8 @@ def render_all(output):
     output=Path(output); body=[]
     for name in ('01_front','02_rear_extension','03_back','05_contact_insert'):
         a=read_stl(output/(name+'.stl'))
-        if name=='02_rear_extension': a[:,:,2]+=23
-        if name=='03_back': a[:,:,1]*=-1; a[:,:,2]=DEPTH-a[:,:,2]
+        if name=='02_rear_extension': a[:,:,2]+=FRONT_DEPTH
+        if name=='03_back': a[:,:,1]*=-1; a[:,:,2]=MAX_DEPTH-a[:,:,2]
         if name=='05_contact_insert': a[:,:,1]+=-H/2+1.5; a[:,:,2]+=CONTACT_INSERT_Z
         body.append((a, [105,133,153]))
     body.append((rectangle(-33.9,33.9,-53.05+BOARD_Y,53.05+BOARD_Y,2.3), [18,25,33]))
@@ -91,6 +93,6 @@ def render_all(output):
     items=[(read_stl(output/(name+'.stl')), [105,133,153]) for name in ('01_front','02_rear_extension','03_back')]
     # Explode along the case depth, with correct assembly orientation.
     items[1][0][:,:,2]+=32
-    items[2][0][:,:,1]*=-1; items[2][0][:,:,2]=60-items[2][0][:,:,2]
+    items[2][0][:,:,1]*=-1; items[2][0][:,:,2]=MAX_DEPTH+30-items[2][0][:,:,2]
     for vertices,_ in items:vertices[:,:,2]*=-1
     rasterize(items,[.65,-1,1.2]).save(output/'exploded.png')
