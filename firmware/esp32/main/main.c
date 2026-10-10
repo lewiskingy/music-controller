@@ -3,6 +3,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <math.h>
+#include <ctype.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -56,7 +57,7 @@ static volatile bool providers_dirty = true;
 static volatile bool provider_fetch_pending;
 static SemaphoreHandle_t state_mutex;
 static QueueHandle_t action_queue;
-typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS, VIEW_QUEUE, VIEW_BROWSE } view_t;
+typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS, VIEW_QUEUE, VIEW_BROWSE, VIEW_SEARCH } view_t;
 typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_VOLUME_SET, ACT_SEEK, ACT_QUEUE_PLAY, ACT_BROWSE_PLAY } action_type_t;
 typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; int position; char queue_id[129], item_id[129], media_uri[513]; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
@@ -70,7 +71,7 @@ typedef struct { bool pending; char id[24]; int64_t started; } pending_command_t
 static pending_command_t commands[PLAYBACK_GROUPS];
 static action_t deferred_volume;
 static bool volume_deferred;
-static bool current_can_volume, gateway_can_queue, gateway_can_browse, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
+static bool current_can_volume, gateway_can_queue, gateway_can_browse, gateway_can_search, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
 static char current_queue_id[129], current_item_id[129], album[160];
 static char current_art_id[65];
 static bool gateway_can_artwork;
@@ -110,6 +111,22 @@ static void browse_changed(void) {
     browse_generation++; browse_count=0; browse_loading=false; browse_more=false;
     browse_request_id[0]=0; browse_requested=true; browse_dirty=true;
 }
+static const char *search_kind_names[]={"tracks","albums","artists","playlists"};
+static ui_media_item_t search_items[UI_QUEUE_PAGE_SIZE];
+static unsigned search_count,search_generation,search_request_generation,search_kind;
+static bool search_loading,search_requested,search_dirty=true,browse_from_search;
+static char search_query[193],search_request_id[24],search_request_provider[96];
+static char search_message[96]="Enter a title or artist";
+static int64_t search_request_started;
+static const music_provider_t *selected_music_provider(void) {
+    for(size_t i=0;i<music_provider_count;i++) if(music_providers[i].selected) return &music_providers[i];
+    return NULL;
+}
+static void reset_search(void) {
+    search_generation++; search_count=0; search_loading=false; search_requested=false;
+    search_request_id[0]=0; search_dirty=true;
+    snprintf(search_message,sizeof(search_message),"Enter a title or artist");
+}
 static int track_duration;
 static double track_position, track_speed = 1.0;
 static bool queue_playing;
@@ -129,7 +146,7 @@ static bool can_seek(void) {
     return playback_seek_allowed(track_duration, queue_live, queue_active, queue_allow_seek,
                                  gateway_can_seek, current_queue_id[0] && current_item_id[0]);
 }
-static char provider_feedback[96] = "Tap checkboxes, then Save";
+static char provider_feedback[96] = "Choose a provider, then Save";
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
 static volatile bool ip_ready;
@@ -154,6 +171,7 @@ static void build_providers_view(void);
 static void update_now_playing(void);
 static void build_queue_view(void);
 static void build_browse_view(void);
+static void build_search_view(void);
 static bool render(void) {
     if (!now_screen || !lvgl_port_lock(250)) return false;
     bool rendered = false;
@@ -163,6 +181,7 @@ static bool render(void) {
         if (providers_dirty) { build_providers_view(); providers_dirty = false; }
         if (queue_dirty) { build_queue_view(); queue_dirty=false; }
         if (browse_dirty) { build_browse_view(); browse_dirty=false; }
+        if (search_dirty) { build_search_view(); search_dirty=false; }
         xSemaphoreGive(state_mutex);
         rendered = true;
     }
@@ -242,7 +261,7 @@ static void process_action(const action_t *action) {
     if (action->type == ACT_PROVIDER_SAVE) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         save_music_providers();
-        reset_browse();
+        reset_browse(); reset_search();
         screen_dirty = true;
         xSemaphoreGive(state_mutex);
         return;
@@ -250,12 +269,13 @@ static void process_action(const action_t *action) {
     if (action->type == ACT_PROVIDER_TOGGLE) {
         if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(250)) != pdTRUE) return;
         bool found = false;
-        for (size_t i = 0; i < music_provider_count; ++i) {
-            if (!strcmp(music_providers[i].id, action->player_id)) {
-                music_providers[i].selected = action->selected;
-                found = true;
-                break;
-            }
+        for(size_t i=0;i<music_provider_count;i++)
+            if(!strcmp(music_providers[i].id,action->player_id)) found=true;
+        if(found) {
+            for(size_t i=0;i<music_provider_count;i++)
+                music_providers[i].selected=!strcmp(music_providers[i].id,action->player_id);
+            providers_dirty=true; reset_browse(); reset_search();
+            snprintf(provider_feedback,sizeof(provider_feedback),"Provider selected - tap Save");
         }
         xSemaphoreGive(state_mutex);
         if (found) ESP_LOGI(TAG, "Provider selection changed; awaiting Save");
@@ -291,7 +311,7 @@ static void process_action(const action_t *action) {
     bool allowed = ready && current_available &&
         playback_target_matches(player_id, current_queue_id, current_item_id,
                                 action->player_id, action->queue_id, action->item_id, group == PLAYBACK_SEEK);
-    if(action->type==ACT_BROWSE_PLAY) allowed=allowed && gateway_can_browse && current_queue_id[0] &&
+    if(action->type==ACT_BROWSE_PLAY) allowed=allowed && (gateway_can_browse || gateway_can_search) && current_queue_id[0] &&
         !strcmp(current_queue_id,action->queue_id) && action->media_uri[0];
     if(action->type==ACT_QUEUE_PLAY) allowed=allowed && gateway_can_queue &&
         current_queue_id[0] && !strcmp(current_queue_id,action->queue_id) && action->item_id[0];
@@ -398,7 +418,7 @@ static void players_received(const cJSON *array) {
 }
 
 static bool provider_is_selected(const char *id) {
-    if (!provider_selection_saved) return true;
+    if (!provider_selection_saved) return false;
     char needle[100];
     snprintf(needle, sizeof(needle), "|%s|", id);
     return strstr(selected_provider_ids, needle) != NULL;
@@ -419,6 +439,7 @@ static void save_music_providers(void) {
             status("Provider selection too large");
             return;
         }
+        break;
     }
     nvs_handle_t n;
     if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) {
@@ -456,10 +477,15 @@ static void providers_received(const cJSON *array) {
         if (!provider->id[0]) continue;
         field(provider->name, sizeof(provider->name), item, "name");
         if (!provider->name[0]) memcpy(provider->name, provider->id, strlen(provider->id) + 1);
-        provider->selected = provider_is_selected(provider->id);
+        provider->selected = false;
         music_provider_count++;
     }
-    providers_dirty = true; browse_dirty=true;
+    size_t chosen=0;
+    for(size_t i=0;i<music_provider_count;i++) if(provider_is_selected(music_providers[i].id)) { chosen=i; break; }
+    for(size_t i=0;i<music_provider_count;i++) music_providers[i].selected=i==chosen;
+    const music_provider_t *selected=selected_music_provider();
+    if(search_request_provider[0] && (!selected || strcmp(selected->id,search_request_provider))) reset_search();
+    providers_dirty = true; browse_dirty=true; search_dirty=true;
     xSemaphoreGive(state_mutex);
     ESP_LOGI(TAG, "Music providers discovered: %u", (unsigned)music_provider_count);
 }
@@ -632,17 +658,8 @@ static void request_browse_page(void) {
         snprintf(browse_message,sizeof(browse_message),"Browse request failed - tap Refresh"); xSemaphoreGive(state_mutex);
     }
 }
-static void browse_page_received(const char *id,const cJSON *result,bool error) {
-    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
-    if(browse_loading && !strcmp(id,browse_request_id) && browse_request_generation==browse_generation) {
-        browse_loading=false; browse_count=0; browse_more=false;
-        const cJSON *items=cJSON_GetObjectItemCaseSensitive(result,"items");
-        if(error || !cJSON_IsArray(items)) snprintf(browse_message,sizeof(browse_message),"Could not browse - tap Refresh");
-        else {
-            const cJSON *item;
-            cJSON_ArrayForEach(item,items) {
-                if(browse_count>=UI_QUEUE_PAGE_SIZE) break;
-                ui_media_item_t *row=&browse_items[browse_count++]; memset(row,0,sizeof(*row));
+static void parse_media_row(ui_media_item_t *row,const cJSON *item) {
+    memset(row,0,sizeof(*row));
                 field(row->id,sizeof(row->id),item,"id"); field(row->provider,sizeof(row->provider),item,"provider");
                 field(row->uri,sizeof(row->uri),item,"uri"); field(row->title,sizeof(row->title),item,"name");
                 field(row->subtitle,sizeof(row->subtitle),item,"subtitle");
@@ -655,11 +672,81 @@ static void browse_page_received(const char *id,const cJSON *result,bool error) 
                     else if(!strcmp(kind->valuestring,"folder")) row->kind=UI_MEDIA_FOLDER;
                 }
                 row->available=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item,"available"));
+}
+static void browse_page_received(const char *id,const cJSON *result,bool error) {
+    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
+    if(browse_loading && !strcmp(id,browse_request_id) && browse_request_generation==browse_generation) {
+        browse_loading=false; browse_count=0; browse_more=false;
+        const cJSON *items=cJSON_GetObjectItemCaseSensitive(result,"items");
+        if(error || !cJSON_IsArray(items)) snprintf(browse_message,sizeof(browse_message),"Could not browse - tap Refresh");
+        else {
+            const cJSON *item;
+            cJSON_ArrayForEach(item,items) {
+                if(browse_count>=UI_QUEUE_PAGE_SIZE) break;
+                ui_media_item_t *row=&browse_items[browse_count++]; memset(row,0,sizeof(*row));
+                parse_media_row(row,item);
             }
             browse_more=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result,"has_more"));
             snprintf(browse_message,sizeof(browse_message),browse_count?"Choose an item":"No items in this source");
         }
         browse_dirty=true; screen_dirty=true;
+    }
+    xSemaphoreGive(state_mutex);
+}
+static void request_search(void) {
+    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
+    if(!search_requested || search_loading) { xSemaphoreGive(state_mutex); return; }
+    search_requested=false; search_dirty=true;
+    const music_provider_t *provider=selected_music_provider();
+    if(!ready || !gateway_can_search || !provider || !search_query[0]) {
+        snprintf(search_message,sizeof(search_message),!ready?"Reconnect to search":(!gateway_can_search?"Gateway update required for Search":(!provider?"Choose a provider in Settings":"Enter a title or artist")));
+        xSemaphoreGive(state_mutex); return;
+    }
+    search_loading=true; search_request_started=esp_timer_get_time();
+    search_request_generation=search_generation;
+    snprintf(search_request_id,sizeof(search_request_id),"s%u",++request_id);
+    snprintf(search_request_provider,sizeof(search_request_provider),"%s",provider->id);
+    snprintf(search_message,sizeof(search_message),"Searching...");
+    cJSON *message=cJSON_CreateObject(), *args=cJSON_CreateObject();
+    if(!message || !args) {
+        cJSON_Delete(message); cJSON_Delete(args); search_loading=false;
+        snprintf(search_message,sizeof(search_message),"Not enough memory - retry Search");
+        xSemaphoreGive(state_mutex); return;
+    }
+    cJSON_AddStringToObject(message,"message_id",search_request_id);
+    cJSON_AddStringToObject(message,"command","controller/search");
+    cJSON_AddStringToObject(args,"query",search_query);
+    cJSON_AddStringToObject(args,"kind",search_kind_names[search_kind]);
+    cJSON_AddStringToObject(args,"provider",search_request_provider);
+    cJSON_AddItemToObject(message,"args",args);
+    char *payload=cJSON_PrintUnformatted(message); cJSON_Delete(message); xSemaphoreGive(state_mutex);
+    bool sent=payload && esp_websocket_client_send_text(socket_handle,payload,strlen(payload),pdMS_TO_TICKS(1000))==(int)strlen(payload);
+    free(payload);
+    if(!sent && xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+        search_loading=false; search_dirty=true;
+        snprintf(search_message,sizeof(search_message),"Search request failed - retry"); xSemaphoreGive(state_mutex);
+    }
+}
+static void search_received(const char *id,const cJSON *result,bool error) {
+    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
+    const music_provider_t *provider=selected_music_provider();
+    if(search_loading && !strcmp(id,search_request_id) && search_request_generation==search_generation &&
+       provider && !strcmp(provider->id,search_request_provider)) {
+        search_loading=false; search_count=0;
+        const cJSON *items=cJSON_GetObjectItemCaseSensitive(result,"items");
+        if(error || !cJSON_IsArray(items)) snprintf(search_message,sizeof(search_message),"Search failed - retry Search");
+        else {
+            const cJSON *item;
+            cJSON_ArrayForEach(item,items) {
+                if(search_count>=UI_QUEUE_PAGE_SIZE) break;
+                parse_media_row(&search_items[search_count++],item);
+            }
+            bool more=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result,"has_more"));
+            const cJSON *scope=cJSON_GetObjectItemCaseSensitive(result,"scope");
+            bool library=cJSON_IsString(scope) && !strcmp(scope->valuestring,"library");
+            snprintf(search_message,sizeof(search_message),more?"First 20 results - refine your search":(search_count?(library?"Library results - tap an item":"Tap a result"):(library?"No library results - refine search":"No results - try another search")));
+        }
+        search_dirty=true;
     }
     xSemaphoreGive(state_mutex);
 }
@@ -672,13 +759,14 @@ static void handle_message(const char *payload, size_t len) {
         if (!strcmp(event->valuestring, "gateway/ready")) {
             const cJSON *caps = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "capabilities");
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(caps, "seek"));
-            gateway_can_queue=false; gateway_can_browse=false;
+            gateway_can_queue=false; gateway_can_browse=false; gateway_can_search=false;
             ready = true; status("Connected"); refresh_pending = true;
             provider_fetch_pending = true;
         } else if (!strcmp(event->valuestring, "gateway/capabilities")) {
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "seek"));
             gateway_can_browse = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "browse"));
-            browse_dirty=true;
+            gateway_can_search = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "search"));
+            browse_dirty=true; search_dirty=true;
             gateway_can_queue = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "queue_item_play"));
             gateway_can_artwork = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "artwork_rgb565"));
             screen_dirty = true;
@@ -693,6 +781,10 @@ static void handle_message(const char *payload, size_t len) {
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(msg, "result");
     const cJSON *error = cJSON_GetObjectItemCaseSensitive(msg, "error");
     if (!error || cJSON_IsNull(error) || cJSON_IsFalse(error)) error = cJSON_GetObjectItemCaseSensitive(msg, "error_code");
+    if(cJSON_IsString(mid) && mid->valuestring[0]=='s') {
+        search_received(mid->valuestring,result,error && !cJSON_IsNull(error) && !cJSON_IsFalse(error));
+        cJSON_Delete(msg); return;
+    }
     if(cJSON_IsString(mid) && mid->valuestring[0]=='b') {
         browse_page_received(mid->valuestring,result,error && !cJSON_IsNull(error) && !cJSON_IsFalse(error));
         cJSON_Delete(msg); return;
@@ -715,6 +807,7 @@ static void handle_message(const char *payload, size_t len) {
             if(reply_group==PLAYBACK_TRANSPORT && xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
                 snprintf(queue_message,sizeof(queue_message),"Playback failed - try another track"); queue_dirty=true;
                 snprintf(browse_message,sizeof(browse_message),"Playback failed - try another item"); browse_dirty=true;
+                snprintf(search_message,sizeof(search_message),"Playback failed - try another result"); search_dirty=true;
                 xSemaphoreGive(state_mutex);
             }
         } else if (cJSON_IsArray(result)) {
@@ -836,6 +929,43 @@ static void enqueue(action_type_t type, const char *id) {
     xSemaphoreGive(state_mutex);
 }
 static void dock_action(const ui_intent_t *intent) {
+    if(intent->type>=UI_SEARCH_OPEN) {
+        if(xSemaphoreTake(state_mutex,0)!=pdTRUE) return;
+        if(intent->type==UI_SEARCH_OPEN) { active_view=VIEW_SEARCH; search_dirty=true; }
+        else if(intent->type==UI_SEARCH_EDIT || intent->type==UI_SEARCH_SUBMIT) {
+            reset_search();
+            snprintf(search_query,sizeof(search_query),"%s",intent->query);
+            size_t leading=strspn(search_query," \t\r\n");
+            memmove(search_query,search_query+leading,strlen(search_query+leading)+1);
+            size_t length=strlen(search_query);
+            while(length && isspace((unsigned char)search_query[length-1])) search_query[--length]=0;
+            search_kind=intent->value>=0 && intent->value<4 ? (unsigned)intent->value : 0;
+            search_requested=intent->type==UI_SEARCH_SUBMIT;
+            if(intent->type==UI_SEARCH_EDIT) snprintf(search_message,sizeof(search_message),"Tap Search to find music");
+        } else if(intent->generation==search_generation && intent->value>=0 && intent->value<(int)search_count) {
+            ui_media_item_t *item=&search_items[intent->value];
+            if(item->available && !strcmp(item->id,intent->item_id)) {
+                if(intent->type==UI_SEARCH_PLAY && !strcmp(intent->player_id,player_id) && !strcmp(intent->queue_id,current_queue_id)) {
+                    action_t action={.type=ACT_BROWSE_PLAY};
+                    snprintf(action.player_id,sizeof(action.player_id),"%s",intent->player_id);
+                    snprintf(action.queue_id,sizeof(action.queue_id),"%s",intent->queue_id);
+                    snprintf(action.media_uri,sizeof(action.media_uri),"%s",item->uri); queue_action(&action);
+                } else if(intent->type==UI_SEARCH_SELECT && gateway_can_browse) {
+                    reset_browse(); browse_from_search=true; browse_depth=1;
+                    const music_provider_t *provider=selected_music_provider();
+                    browse_context_t *context=&browse_stack[1];
+                    if(provider) snprintf(context->source,sizeof(context->source),"%s",provider->id);
+                    snprintf(context->provider,sizeof(context->provider),"%s",item->provider);
+                    snprintf(context->id,sizeof(context->id),"%s",item->id);
+                    snprintf(context->title,sizeof(context->title),"%s",item->title);
+                    snprintf(context->uri,sizeof(context->uri),"%s",item->uri);
+                    context->kind=item->kind==UI_MEDIA_ARTIST?BROWSE_ARTIST_ALBUMS:(item->kind==UI_MEDIA_PLAYLIST?BROWSE_PLAYLIST_TRACKS:BROWSE_ALBUM_TRACKS);
+                    active_view=VIEW_BROWSE; browse_changed(); controller_ui_show(&ui,UI_BROWSE);
+                }
+            }
+        }
+        xSemaphoreGive(state_mutex); return;
+    }
     if(intent->type>=UI_BROWSE_OPEN) {
         if(xSemaphoreTake(state_mutex,0)!=pdTRUE) return;
         if(intent->type==UI_BROWSE_PLAY || intent->type==UI_BROWSE_PLAY_ALL) {
@@ -848,10 +978,12 @@ static void dock_action(const ui_intent_t *intent) {
                 queue_action(&action);
             }
         } else if(intent->type==UI_BROWSE_OPEN) {
-            active_view=VIEW_BROWSE; reset_browse(); browse_changed();
+            active_view=VIEW_BROWSE; browse_from_search=false; reset_browse(); browse_changed();
         } else if(intent->type==UI_BROWSE_BACK) {
-            if(browse_depth) browse_depth--;
-            browse_changed();
+            if(browse_from_search && browse_depth==1) {
+                browse_from_search=false; reset_browse(); active_view=VIEW_SEARCH; search_dirty=true;
+                controller_ui_show(&ui,UI_SEARCH);
+            } else { if(browse_depth) browse_depth--; browse_changed(); }
         } else if(intent->type==UI_BROWSE_SELECT && intent->generation==browse_generation &&
                   intent->value>=0 && intent->value<(int)browse_count && browse_depth<7) {
             ui_media_item_t *item=&browse_items[intent->value];
@@ -910,6 +1042,14 @@ static void dock_action(const ui_intent_t *intent) {
     queue_action(&action);
     xSemaphoreGive(state_mutex);
 }
+static void build_search_view(void) {
+    const music_provider_t *provider=selected_music_provider();
+    controller_ui_search(&ui,search_items,search_count,provider?provider->name:"Choose a music provider in Settings",
+        !ready?"Disconnected - reconnect to search":(!gateway_can_search?"Gateway update required for Search":search_message),
+        search_loading,ready && current_available && gateway_can_search && current_queue_id[0] && !commands[PLAYBACK_TRANSPORT].pending,search_generation);
+    /* Also apply capability and stale-player guards to newly constructed rows. */
+    update_now_playing();
+}
 static void player_clicked(lv_event_t *event) {
     const char *id = lv_event_get_user_data(event);
     if (!id) return;
@@ -941,7 +1081,7 @@ static void update_now_playing(void) {
         .transport_pending = commands[PLAYBACK_TRANSPORT].pending,
         .volume_pending = commands[PLAYBACK_VOLUME].pending,
         .seek_pending = commands[PLAYBACK_SEEK].pending,
-        .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live, .can_queue=gateway_can_queue, .can_browse=gateway_can_browse
+        .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live, .can_queue=gateway_can_queue, .can_browse=gateway_can_browse, .can_search=gateway_can_search
     };
     controller_ui_update(&ui, &snapshot);
     if (art_result) {
@@ -1007,8 +1147,9 @@ static void provider_toggled(lv_event_t *event) {
     if (!id) return;
     action_t action = {.type = ACT_PROVIDER_TOGGLE};
     snprintf(action.player_id, sizeof(action.player_id), "%s", id);
-    action.selected = lv_obj_has_state(checkbox, LV_STATE_CHECKED);
-    ESP_LOGI(TAG, "Provider checkbox changed: selected=%d", (int)action.selected);
+    controller_ui_choose_source(providers_list,checkbox);
+    action.selected = true;
+    ESP_LOGI(TAG, "Provider radio choice: selected=%d", (int)action.selected);
     if (xQueueSend(action_queue, &action, 0) != pdTRUE)
         ESP_LOGW(TAG, "Provider selection queue full");
 }
@@ -1028,12 +1169,7 @@ static void build_providers_view(void) {
         return;
     }
     for (size_t i = 0; i < music_provider_count; ++i) {
-        lv_obj_t *checkbox = lv_checkbox_create(providers_list);
-        lv_checkbox_set_text(checkbox, music_providers[i].name);
-        lv_obj_set_width(checkbox, 352);
-        lv_obj_set_height(checkbox, 72);
-        controller_ui_style_source(checkbox);
-        if (music_providers[i].selected) lv_obj_add_state(checkbox, LV_STATE_CHECKED);
+        lv_obj_t *checkbox=controller_ui_source_row(providers_list,music_providers[i].name,music_providers[i].selected);
         lv_obj_add_event_cb(checkbox, provider_toggled, LV_EVENT_VALUE_CHANGED, music_providers[i].id);
     }
 }
@@ -1214,7 +1350,12 @@ void app_main(void) {
         while (xQueueReceive(action_queue, &action, 0) == pdTRUE) process_action(&action);
         request_queue_page();
         request_browse_page();
+        request_search();
         if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+            if(search_loading && (!ready || esp_timer_get_time()-search_request_started>10000000LL)) {
+                search_loading=false; search_request_id[0]=0; search_dirty=true;
+                snprintf(search_message,sizeof(search_message),"Search timed out - retry Search");
+            }
             if(browse_loading && (!ready || esp_timer_get_time()-browse_request_started>10000000LL)) {
                 browse_loading=false; browse_request_id[0]=0; browse_dirty=true;
                 snprintf(browse_message,sizeof(browse_message),"Browse timed out - tap Refresh");
@@ -1225,7 +1366,7 @@ void app_main(void) {
             }
             xSemaphoreGive(state_mutex);
         }
-        if (screen_dirty || players_dirty || providers_dirty || queue_dirty || browse_dirty) {
+        if (screen_dirty || players_dirty || providers_dirty || queue_dirty || browse_dirty || search_dirty) {
             screen_dirty = false;
             if (!render()) screen_dirty = true;
         }
@@ -1237,6 +1378,7 @@ void app_main(void) {
                 if (!ready) volume_deferred = false;
                 if(expired && group==PLAYBACK_TRANSPORT) {
                     snprintf(queue_message,sizeof(queue_message),"Playback unconfirmed - tap Refresh"); queue_dirty=true;
+                    snprintf(search_message,sizeof(search_message),"Playback unconfirmed - retry Search"); search_dirty=true;
                 }
                 xSemaphoreGive(state_mutex);
             }

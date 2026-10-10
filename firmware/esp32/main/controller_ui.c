@@ -54,6 +54,7 @@ void controller_ui_set_theme(controller_ui_t *ui, unsigned palette, bool light) 
     }
 }
 void controller_ui_style_source(lv_obj_t *obj) {
+    lv_obj_set_style_radius(obj,LV_RADIUS_CIRCLE,LV_PART_INDICATOR);
     fg(obj,TEXT,0); bg(obj,CARD,LV_PART_INDICATOR);
     bg(obj,ACCENT,LV_PART_INDICATOR | LV_STATE_CHECKED);
 }
@@ -192,6 +193,43 @@ static void browse_clicked(lv_event_t *event) {
         send_intent(ui,ui->browse_kinds[i]==UI_MEDIA_TRACK?UI_BROWSE_PLAY:UI_BROWSE_SELECT,(int)i,&ui->browse_targets[i]); break;
     }
 }
+static void search_input_mode(controller_ui_t *ui,bool editing) {
+    if(editing) {
+        lv_obj_clear_flag(ui->search_keyboard,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui->search_list,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui->search_filter,LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui->search_keyboard,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui->search_list,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui->search_filter,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_state(ui->search_input,LV_STATE_FOCUSED);
+    }
+}
+static void search_send(controller_ui_t *ui,ui_action_t action) {
+    ui_intent_t target=ui->current;
+    snprintf(target.query,sizeof(target.query),"%s",lv_textarea_get_text(ui->search_input));
+    target.generation=ui->search_generation;
+    send_intent(ui,action,(int)lv_dropdown_get_selected(ui->search_filter),&target);
+}
+static void search_clicked(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_t *target=lv_event_get_target(event);
+    lv_event_code_t code=lv_event_get_code(event);
+    if(target==ui->navigation[3]) {
+        controller_ui_show(ui,UI_SEARCH); search_send(ui,UI_SEARCH_OPEN);
+    } else if(target==ui->search_input && code==LV_EVENT_FOCUSED) search_input_mode(ui,true);
+    else if((target==ui->search_input || target==ui->search_filter) && code==LV_EVENT_VALUE_CHANGED) {
+        /* Disable obsolete results immediately, before the main loop consumes the edit. */
+        for(unsigned i=0;i<ui->search_count;i++) lv_obj_add_state(ui->search_rows[i],LV_STATE_DISABLED);
+        ui->search_count=0;
+        search_send(ui,UI_SEARCH_EDIT);
+    } else if(target==ui->search_submit || (target==ui->search_keyboard && code==LV_EVENT_READY)) {
+        search_input_mode(ui,false); search_send(ui,UI_SEARCH_SUBMIT);
+    } else if(target==ui->search_keyboard && code==LV_EVENT_CANCEL) search_input_mode(ui,false);
+    else for(unsigned i=0;i<ui->search_count;i++) if(target==ui->search_rows[i]) {
+        send_intent(ui,ui->search_kinds[i]==UI_MEDIA_TRACK?UI_SEARCH_PLAY:UI_SEARCH_SELECT,(int)i,&ui->search_targets[i]); break;
+    }
+}
 /* Reusable two-line media row for browse results and other catalogue lists. */
 static lv_obj_t *media_row(lv_obj_t *parent,const char *title,const char *subtitle,
                            const char *marker,lv_event_cb_t callback,controller_ui_t *ui) {
@@ -276,12 +314,12 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_set_size(ui->players_list, 352, 448);
     bg(ui->players_list, BG, 0);
     lv_obj_set_style_border_width(ui->players_list, 0, 0);
-    label(ui->providers_content, "Choose music sources", 24, 20, 352, MUTED, false);
+    label(ui->providers_content, "Choose one music provider", 24, 20, 352, MUTED, false);
     ui->providers_list = panel(ui->providers_content, 24, 60, 352, 364, BG);
     lv_obj_add_flag(ui->providers_list, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(ui->providers_list, LV_FLEX_FLOW_COLUMN);
     ui->save_button = button(ui->providers_content, "Save", 232, 434, 144, 56, save_cb, NULL);
-    ui->provider_feedback = label(ui->providers_content, "Tap checkboxes, then Save", 24, 503, 352, MUTED, false);
+    ui->provider_feedback = label(ui->providers_content, "Choose a provider, then Save", 24, 503, 352, MUTED, false);
     lv_obj_t *dock = panel(root, 0, UI_DOCK_Y, UI_WIDTH, UI_DOCK_HEIGHT, SURFACE);
     lv_obj_t *thumbnail = panel(dock, 24, 12, 40, 40, ACTIVE);
     ui->thumbnail = thumbnail;
@@ -312,8 +350,7 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_t *nav = panel(root, 0, UI_NAV_Y, UI_WIDTH, UI_NAV_HEIGHT, BG);
     const char *tabs[] = {"Playing", "Queue", "Browse", "Search"};
     for (unsigned i=0;i<4;i++) {
-        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:(i==1?queue_clicked:(i==2?browse_clicked:NULL)),i==1 || i==2?ui:NULL);
-        if(i>2) lv_obj_add_state(ui->navigation[i],LV_STATE_DISABLED);
+        ui->navigation[i] = button(nav,tabs[i],8+118*i,10,110,48,i==0?back_cb:(i==1?queue_clicked:(i==2?browse_clicked:search_clicked)),i>0?ui:NULL);
     }
     ui->queue_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     ui->queue_info=label(ui->queue_content,"Queue",24,20,352,MUTED,false);
@@ -336,6 +373,40 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->browse_refresh=button(ui->browse_content,"Refresh",132,452,136,48,browse_clicked,ui);
     ui->browse_more=button(ui->browse_content,"Next",276,452,100,48,browse_clicked,ui);
     ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,352,MUTED,false);
+    ui->search_content=panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
+    ui->search_source=label(ui->search_content,"Choose a music provider in Settings",24,12,352,MUTED,false);
+    ui->search_input=lv_textarea_create(ui->search_content);
+    lv_obj_set_pos(ui->search_input,24,48); lv_obj_set_size(ui->search_input,244,56);
+    lv_textarea_set_one_line(ui->search_input,true); lv_textarea_set_max_length(ui->search_input,48);
+    lv_textarea_set_placeholder_text(ui->search_input,"Search music");
+    bg(ui->search_input,CARD,LV_PART_MAIN); fg(ui->search_input,TEXT,LV_PART_MAIN);
+    fg(ui->search_input,MUTED,LV_PART_TEXTAREA_PLACEHOLDER); bg(ui->search_input,ACCENT,LV_PART_CURSOR);
+    lv_obj_add_event_cb(ui->search_input,search_clicked,LV_EVENT_FOCUSED,ui);
+    lv_obj_add_event_cb(ui->search_input,search_clicked,LV_EVENT_VALUE_CHANGED,ui);
+    ui->search_submit=button(ui->search_content,"Search",276,48,100,56,search_clicked,ui);
+    ui->search_filter=lv_dropdown_create(ui->search_content);
+    lv_obj_set_pos(ui->search_filter,24,116); lv_obj_set_size(ui->search_filter,352,48);
+    lv_dropdown_set_options(ui->search_filter,"Tracks\nAlbums\nArtists\nPlaylists");
+    bg(ui->search_filter,CARD,LV_PART_MAIN); fg(ui->search_filter,TEXT,LV_PART_MAIN);
+    lv_obj_add_event_cb(ui->search_filter,search_clicked,LV_EVENT_VALUE_CHANGED,ui);
+    lv_obj_t *filter_list=lv_dropdown_get_list(ui->search_filter);
+    bg(filter_list,SURFACE,LV_PART_MAIN); fg(filter_list,TEXT,LV_PART_MAIN);
+    bg(filter_list,ACTIVE,LV_PART_SELECTED); fg(filter_list,TEXT,LV_PART_SELECTED);
+    ui->search_list=panel(ui->search_content,24,176,352,316,BG);
+    lv_obj_add_flag(ui->search_list,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(ui->search_list,LV_FLEX_FLOW_COLUMN);
+    ui->search_keyboard=lv_keyboard_create(ui->search_content);
+    lv_obj_set_align(ui->search_keyboard,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(ui->search_keyboard,24,116); lv_obj_set_size(ui->search_keyboard,352,376);
+    lv_keyboard_set_textarea(ui->search_keyboard,ui->search_input);
+    bg(ui->search_keyboard,BG,LV_PART_MAIN); bg(ui->search_keyboard,CARD,LV_PART_ITEMS);
+    fg(ui->search_keyboard,TEXT,LV_PART_ITEMS); bg(ui->search_keyboard,ACTIVE,LV_PART_ITEMS|LV_STATE_PRESSED);
+    bg(ui->search_keyboard,CARD,LV_PART_ITEMS|LV_STATE_CHECKED); fg(ui->search_keyboard,TEXT,LV_PART_ITEMS|LV_STATE_CHECKED);
+    bg(ui->search_keyboard,ACTIVE,LV_PART_ITEMS|LV_STATE_CHECKED|LV_STATE_PRESSED);
+    lv_obj_add_event_cb(ui->search_keyboard,search_clicked,LV_EVENT_READY,ui);
+    lv_obj_add_event_cb(ui->search_keyboard,search_clicked,LV_EVENT_CANCEL,ui);
+    lv_obj_add_flag(ui->search_keyboard,LV_OBJ_FLAG_HIDDEN);
+    ui->search_feedback=label(ui->search_content,"Enter a title or artist",24,504,352,MUTED,false);
     ui->settings_content = panel(root,0,UI_HEADER_HEIGHT,UI_CONTENT_WIDTH,UI_CONTENT_HEIGHT,BG);
     label(ui->settings_content,"Colour palette",24,20,352,TEXT,true);
     for(unsigned i=0;i<6;i++) {
@@ -350,22 +421,22 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
         bg(ui->mode_buttons[i],ACCENT,LV_STATE_CHECKED);
         fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
     }
-    ui->sources_button=button(ui->settings_content,"Music sources",24,414,352,56,providers_cb,NULL);
+    ui->sources_button=button(ui->settings_content,"Music provider",24,414,352,56,providers_cb,NULL);
     controller_ui_set_theme(ui,0,false);
     controller_ui_show(ui, UI_PLAYING);
 }
 void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
-    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content, ui->browse_content};
-    for (unsigned i = 0; i < 6; ++i) {
+    lv_obj_t *panes[] = {ui->now_content, ui->players_content, ui->providers_content, ui->settings_content, ui->queue_content, ui->browse_content, ui->search_content};
+    for (unsigned i = 0; i < 7; ++i) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
     }
-    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue", "Browse"};
+    const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue", "Browse", "Search"};
     lv_label_set_text(ui->heading, titles[view]);
     for (unsigned i = 0; i < 4; ++i) {
         lv_obj_remove_style(ui->navigation[i], &backgrounds[ACTIVE], 0);
         lv_obj_remove_style(ui->navigation[i], &backgrounds[BG], 0);
-        bg(ui->navigation[i], ((i == 0 && view == UI_PLAYING) || (i == 1 && view == UI_QUEUE) || (i == 2 && view == UI_BROWSE)) ? ACTIVE : BG, 0);
+        bg(ui->navigation[i], ((i == 0 && view == UI_PLAYING) || (i == 1 && view == UI_QUEUE) || (i == 2 && view == UI_BROWSE) || (i == 3 && view == UI_SEARCH)) ? ACTIVE : BG, 0);
     }
 }
 static void enabled(lv_obj_t *obj, bool value) {
@@ -392,6 +463,13 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
     }
     enabled(ui->browse_play_all,!ui->browse_loading && browse_play && ui->browse_album.media_uri[0] &&
         !strcmp(ui->browse_album.player_id,state->player_id) && !strcmp(ui->browse_album.queue_id,state->queue_id));
+    bool search_play=state->connected && state->available && state->can_search && !state->transport_pending;
+    for(unsigned i=0;i<ui->search_count;i++) {
+        bool same=!strcmp(ui->search_targets[i].player_id,state->player_id) &&
+            !strcmp(ui->search_targets[i].queue_id,state->queue_id);
+        enabled(ui->search_rows[i],!ui->search_loading && ui->search_targets[i].value &&
+            (ui->search_kinds[i]==UI_MEDIA_TRACK ? search_play && same : state->connected && state->can_search && state->can_browse));
+    }
     ui->queue_enabled=state->connected && state->available && state->can_queue && !state->transport_pending;
     for(unsigned i=0;i<ui->queue_count;i++) {
         bool same=!strcmp(ui->queue_targets[i].player_id,state->player_id) &&
@@ -535,4 +613,43 @@ void controller_ui_browse(controller_ui_t *ui, const ui_media_item_t *items, uns
         enabled(row,!loading && items[i].available && (!playable || can_play));
         ui->browse_rows[i]=row; ui->browse_count++;
     }
+}
+
+void controller_ui_search(controller_ui_t *ui,const ui_media_item_t *items,unsigned count,
+    const char *provider,const char *message,bool loading,bool can_play,unsigned generation) {
+    lv_obj_clean(ui->search_list); ui->search_count=0; ui->search_loading=loading;
+    ui->search_generation=generation;
+    if(count>UI_QUEUE_PAGE_SIZE) count=UI_QUEUE_PAGE_SIZE;
+    lv_label_set_text(ui->search_source,provider); lv_label_set_text(ui->search_feedback,message);
+    for(unsigned i=0;i<count;i++) {
+        bool playable=items[i].kind==UI_MEDIA_TRACK;
+        lv_obj_t *row=media_row(ui->search_list,items[i].title,items[i].subtitle,
+            playable?LV_SYMBOL_PLAY:LV_SYMBOL_RIGHT,search_clicked,ui);
+        ui->search_targets[i]=ui->current; ui->search_targets[i].generation=generation;
+        snprintf(ui->search_targets[i].item_id,sizeof(ui->search_targets[i].item_id),"%s",items[i].id);
+        snprintf(ui->search_targets[i].provider,sizeof(ui->search_targets[i].provider),"%s",items[i].provider);
+        snprintf(ui->search_targets[i].media_uri,sizeof(ui->search_targets[i].media_uri),"%s",items[i].uri);
+        ui->search_targets[i].value=items[i].available; ui->search_kinds[i]=items[i].kind;
+        enabled(row,!loading && items[i].available && (!playable || can_play));
+        ui->search_rows[i]=row; ui->search_count++;
+    }
+}
+void controller_ui_choose_source(lv_obj_t *list,lv_obj_t *chosen) {
+    for(unsigned i=0;i<lv_obj_get_child_cnt(list);i++) {
+        lv_obj_t *row=lv_obj_get_child(list,i);
+        if(row==chosen) lv_obj_add_state(row,LV_STATE_CHECKED);
+        else lv_obj_clear_state(row,LV_STATE_CHECKED);
+    }
+}
+
+static void source_chosen(lv_event_t *event) {
+    lv_obj_t *row=lv_event_get_target(event);
+    controller_ui_choose_source(lv_obj_get_parent(row),row);
+}
+lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected) {
+    lv_obj_t *row=lv_checkbox_create(list);
+    controller_ui_style_source(row); lv_checkbox_set_text(row,name); lv_obj_set_size(row,352,72);
+    if(selected) lv_obj_add_state(row,LV_STATE_CHECKED);
+    lv_obj_add_event_cb(row,source_chosen,LV_EVENT_VALUE_CHANGED,NULL);
+    return row;
 }

@@ -10,7 +10,10 @@ static lv_indev_data_t pointer;
 static ui_intent_t last_intent;
 static unsigned intent_count;
 static const char *output_dir;
-static unsigned checks;
+static unsigned checks, screenshots, theme_saves;
+static unsigned saved_palette;
+static bool saved_light;
+static void theme_saved(unsigned palette,bool light) { theme_saves++; saved_palette=palette; saved_light=light; }
 #define CHECK(value) do { ++checks; if (!(value)) { fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#value); exit(1); } } while(0)
 static void flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *colors) {
     for (int y = area->y1; y <= area->y2; ++y) {
@@ -34,6 +37,7 @@ static void advance(unsigned ms) {
     lv_obj_update_layout(ui.root);
 }
 static void screenshot(const char *name) {
+    screenshots++;
     lv_obj_invalidate(ui.root); advance(350);
     char path[1024]; snprintf(path,sizeof(path),"%s/%s.ppm",output_dir,name);
     FILE *file = fopen(path,"wb"); CHECK(file != NULL);
@@ -95,7 +99,7 @@ static void geometry(void) {
     for(unsigned i=0;i<4;i++) {
         lv_obj_t *caption=lv_obj_get_child(ui.navigation[i],0);
         CHECK(!strcmp(lv_label_get_text(caption),tabs[i])); fixed_caption(caption);
-        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==(i>2));
+        CHECK(lv_obj_has_state(ui.navigation[i],LV_STATE_DISABLED)==false);
         lv_area_t tab=bounds(ui.navigation[i]);
         CHECK(tab.x1==8+(int)i*118 && tab.y1==742);
     }
@@ -118,14 +122,12 @@ int main(int argc,char **argv) {
     }
     const char *sources[]={"Navidrome","Spotify","BBC Sounds"};
     for(unsigned i=0;i<3;i++) {
-        lv_obj_t *row=lv_checkbox_create(ui.providers_list);
-        controller_ui_style_source(row); lv_checkbox_set_text(row,sources[i]); lv_obj_set_size(row,352,72);
-        if(i==0) lv_obj_add_state(row,LV_STATE_CHECKED);
+        controller_ui_source_row(ui.providers_list,sources[i],i==0);
     }
     ui_playback_t state={.track="Daydreamer",.artist="Adele",.album="19",.player="Extension",
         .status="Connected",.player_id="room-a",.queue_id="queue-a",.item_id="track-a",
         .volume=45,.position=42,.duration=220,.connected=true,.available=true,.playing=true,
-        .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true};
+        .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true,.can_search=true};
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
     click(ui.transport[0]); CHECK(intent_count==1 && last_intent.type==UI_PREVIOUS);
     click(ui.transport[1]); CHECK(intent_count==2 && last_intent.type==UI_PLAY_STOP);
@@ -136,7 +138,14 @@ int main(int argc,char **argv) {
     click(ui.player_button); CHECK(!lv_obj_has_flag(ui.players_content,LV_OBJ_FLAG_HIDDEN));
     screenshot("02-players"); geometry();
     click(ui.settings_button); click(ui.sources_button); CHECK(!lv_obj_has_flag(ui.providers_content,LV_OBJ_FLAG_HIDDEN));
-    screenshot("03-providers"); geometry(); click(ui.save_button);
+    screenshot("03-providers"); geometry();
+    lv_obj_t *first_source=lv_obj_get_child(ui.providers_list,0), *second_source=lv_obj_get_child(ui.providers_list,1);
+    click(second_source);
+    CHECK(!lv_obj_has_state(first_source,LV_STATE_CHECKED) && lv_obj_has_state(second_source,LV_STATE_CHECKED));
+    click(second_source); CHECK(lv_obj_has_state(second_source,LV_STATE_CHECKED));
+    click(first_source);
+    CHECK(lv_obj_has_state(first_source,LV_STATE_CHECKED) && !lv_obj_has_state(second_source,LV_STATE_CHECKED));
+    screenshot("provider-exclusive-choice"); click(ui.save_button);
     CHECK(!strcmp(lv_label_get_text(ui.provider_feedback),"Selection saved"));
     click(ui.navigation[0]); CHECK(!lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
     unsigned before=intent_count;
@@ -194,36 +203,24 @@ int main(int argc,char **argv) {
     screenshot("12-art-loading");
     CHECK(controller_ui_set_artwork(&ui,"generic",generic_packet,8+288*288*2));
     screenshot("13-generic-cover"); geometry();
-    const char *themes[]={"green","blue","red","orange","purple","grey"};
+    ui.theme_cb=theme_saved;
     for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
         state.art_id="mock-album"; controller_ui_update(&ui,&state);
         CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
         click(ui.settings_button); click(ui.palette_buttons[p]); click(ui.mode_buttons[mode]);
         CHECK(ui.palette==p && ui.light==(bool)mode);
+        CHECK(saved_palette==p && saved_light==(bool)mode);
         CHECK(lv_obj_has_state(ui.palette_buttons[p],LV_STATE_CHECKED));
         CHECK(lv_obj_has_state(ui.mode_buttons[mode],LV_STATE_CHECKED));
         geometry();
-        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-settings",themes[p],mode?"light":"dark");
-        screenshot(name);
+        if(p==1 && mode==1) screenshot("theme-edit-settings");
         click(ui.navigation[0]); geometry();
         CHECK(lv_color_to32(lv_obj_get_style_bg_color(ui.timeline,LV_PART_INDICATOR))==
               lv_color_to32(lv_obj_get_style_bg_color(ui.transport[1],LV_PART_MAIN)));
-        snprintf(name,sizeof(name),"theme-%s-%s-playing",themes[p],mode?"light":"dark");
-        screenshot(name);
-        state.art_id="generic"; controller_ui_update(&ui,&state);
-        CHECK(controller_ui_set_artwork(&ui,state.art_id,generic_packet,8+288*288*2));
-        geometry();
-        snprintf(name,sizeof(name),"theme-%s-%s-generic",themes[p],mode?"light":"dark"); screenshot(name);
-        state.art_id="mock-album"; controller_ui_update(&ui,&state);
-        CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
-        unsigned count=intent_count;
-        for(unsigned i=3;i<4;i++) click(ui.navigation[i]);
-        CHECK(intent_count==count && !lv_obj_has_flag(ui.now_content,LV_OBJ_FLAG_HIDDEN));
-        click(ui.player_button); geometry();
-        snprintf(name,sizeof(name),"theme-%s-%s-players",themes[p],mode?"light":"dark"); screenshot(name);
-        click(ui.settings_button); click(ui.sources_button); geometry();
-        snprintf(name,sizeof(name),"theme-%s-%s-sources",themes[p],mode?"light":"dark"); screenshot(name);
+        CHECK(ui.art_loaded && ui.art_pixels[0].full==((unsigned)album_packet[8]|((unsigned)album_packet[9]<<8)));
+        if(p==1 && mode==1) screenshot("theme-edit-applied");
     }
+    CHECK(theme_saves==24);
     controller_ui_set_theme(&ui,0,false);
     click(ui.navigation[1]); CHECK(last_intent.type==UI_QUEUE_OPEN);
     CHECK(!lv_obj_has_flag(ui.queue_content,LV_OBJ_FLAG_HIDDEN));
@@ -262,11 +259,6 @@ int main(int argc,char **argv) {
     state.connected=true; controller_ui_update(&ui,&state);
     controller_ui_queue(&ui,NULL,0,0,0,"","Queue is empty",false,true); screenshot("queue-empty"); geometry();
     controller_ui_queue(&ui,NULL,0,0,0,"","Could not load queue - tap Refresh",false,false); screenshot("queue-error"); geometry();
-    for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
-        controller_ui_set_theme(&ui,p,mode);
-        controller_ui_queue(&ui,rows,20,0,25,state.item_id,"Tap a track to play",false,true);
-        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-queue",themes[p],mode?"light":"dark"); screenshot(name); geometry();
-    }
     controller_ui_set_theme(&ui,0,false);
     click(ui.navigation[2]); CHECK(last_intent.type==UI_BROWSE_OPEN);
     CHECK(!lv_obj_has_flag(ui.browse_content,LV_OBJ_FLAG_HIDDEN));
@@ -339,26 +331,80 @@ int main(int argc,char **argv) {
     state.connected=false; controller_ui_update(&ui,&state);
     CHECK(lv_obj_has_state(ui.browse_rows[0],LV_STATE_DISABLED)); screenshot("browse-disconnected"); geometry();
     state.connected=true; controller_ui_update(&ui,&state);
-    for(unsigned p=0;p<6;p++) for(unsigned mode=0;mode<2;mode++) {
-        controller_ui_set_theme(&ui,p,mode);
-        for(unsigned i=0;i<4;i++) {
-            catalogue[i].kind=UI_MEDIA_CATEGORY; catalogue[i].available=true;
-            snprintf(catalogue[i].title,sizeof(catalogue[i].title),"%s",category_names[i]);
-            catalogue[i].subtitle[0]=0;
-        }
-        controller_ui_browse(&ui,catalogue,4,"Navidrome","Choose a category",false,true,true,false,false,"",111);
-        char name[80]; snprintf(name,sizeof(name),"theme-%s-%s-browse",themes[p],mode?"light":"dark"); screenshot(name); geometry();
-        for(unsigned i=0;i<20;i++) {
-            catalogue[i].kind=UI_MEDIA_TRACK;
-            snprintf(catalogue[i].uri,sizeof(catalogue[i].uri),"library://track/%u",i+1);
-            snprintf(catalogue[i].title,sizeof(catalogue[i].title),i==0?"Daydreamer":"Track %u",i+1);
-            snprintf(catalogue[i].subtitle,sizeof(catalogue[i].subtitle),"Adele");
-        }
-        controller_ui_browse(&ui,catalogue,20,"19","Tap a track or Play all",false,true,true,false,false,"library://album/1",112);
-        snprintf(name,sizeof(name),"theme-%s-%s-browse-tracks",themes[p],mode?"light":"dark"); screenshot(name); geometry();
+    /* Search input and keyboard stay inside the content pane; both docks persist. */
+    click(ui.navigation[3]); CHECK(last_intent.type==UI_SEARCH_OPEN);
+    CHECK(!lv_obj_has_flag(ui.search_content,LV_OBJ_FLAG_HIDDEN));
+    controller_ui_search(&ui,NULL,0,"Navidrome","Enter a title or artist",false,true,200);
+    screenshot("search-start"); geometry();
+    click(ui.search_input); CHECK(!lv_obj_has_flag(ui.search_keyboard,LV_OBJ_FLAG_HIDDEN));
+    CHECK(lv_obj_has_flag(ui.search_list,LV_OBJ_FLAG_HIDDEN));
+    lv_area_t keyboard=bounds(ui.search_keyboard);
+    CHECK(keyboard.x1>=24 && keyboard.x2<400 && keyboard.y1>=64 && keyboard.y2<596);
+    /* Exercise the real keyboard default handler with its selected key. */
+    unsigned key=0;
+    while(strcmp(lv_btnmatrix_get_btn_text(ui.search_keyboard,key),"a")) { key++; CHECK(key<100); }
+    lv_btnmatrix_set_selected_btn(ui.search_keyboard,key);
+    lv_event_send(ui.search_keyboard,LV_EVENT_VALUE_CHANGED,NULL);
+    CHECK(!strcmp(lv_textarea_get_text(ui.search_input),"a") && last_intent.type==UI_SEARCH_EDIT);
+    lv_textarea_set_text(ui.search_input,"Adele");
+    screenshot("search-keyboard"); geometry();
+    lv_event_send(ui.search_keyboard,LV_EVENT_READY,NULL);
+    CHECK(last_intent.type==UI_SEARCH_SUBMIT && !strcmp(last_intent.query,"Adele") && last_intent.value==0);
+    CHECK(lv_obj_has_flag(ui.search_keyboard,LV_OBJ_FLAG_HIDDEN));
+    controller_ui_search(&ui,NULL,0,"Navidrome","Searching...",true,false,201);
+    screenshot("search-loading"); geometry();
+    for(unsigned i=0;i<20;i++) {
+        snprintf(catalogue[i].id,sizeof(catalogue[i].id),"track-%u",i+1);
+        snprintf(catalogue[i].uri,sizeof(catalogue[i].uri),"navidrome://track/%u",i+1);
+        snprintf(catalogue[i].provider,sizeof(catalogue[i].provider),"navidrome");
+        snprintf(catalogue[i].title,sizeof(catalogue[i].title),i==0?"Daydreamer":"Track %u",i+1);
+        snprintf(catalogue[i].subtitle,sizeof(catalogue[i].subtitle),"Adele");
+        catalogue[i].kind=UI_MEDIA_TRACK; catalogue[i].available=i!=2;
     }
+    controller_ui_search(&ui,catalogue,20,"Navidrome","First 20 results - refine your search",false,true,202);
+    screenshot("search-tracks"); geometry();
+    click(ui.search_rows[0]); CHECK(last_intent.type==UI_SEARCH_PLAY && last_intent.generation==202);
+    CHECK(!strcmp(last_intent.media_uri,"navidrome://track/1") && !strcmp(last_intent.queue_id,"queue-a"));
+    before=intent_count; click(ui.search_rows[2]); CHECK(intent_count==before);
+    state.player_id="other-room"; controller_ui_update(&ui,&state);
+    before=intent_count; click(ui.search_rows[0]); CHECK(intent_count==before);
+    state.player_id="room-a"; state.transport_pending=true; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.search_rows[0],LV_STATE_DISABLED));
+    state.transport_pending=false; controller_ui_update(&ui,&state);
+    /* Editing makes old results untappable immediately, even before a render. */
+    lv_textarea_set_text(ui.search_input,"New query"); CHECK(ui.search_count==0 && last_intent.type==UI_SEARCH_EDIT);
+    before=intent_count; click(ui.search_rows[0]); CHECK(intent_count==before);
+    const ui_media_kind_t search_kinds[]={UI_MEDIA_ALBUM,UI_MEDIA_ARTIST,UI_MEDIA_PLAYLIST};
+    const char *search_names[]={"search-albums","search-artists","search-playlists"};
+    for(unsigned i=0;i<3;i++) {
+        lv_dropdown_set_selected(ui.search_filter,i+1); lv_event_send(ui.search_filter,LV_EVENT_VALUE_CHANGED,NULL);
+        CHECK(last_intent.type==UI_SEARCH_EDIT && last_intent.value==(int)i+1);
+        click(ui.search_submit); CHECK(last_intent.type==UI_SEARCH_SUBMIT && last_intent.value==(int)i+1);
+        catalogue[0].kind=search_kinds[i];
+        snprintf(catalogue[0].title,sizeof(catalogue[0].title),"%s",i==0?"19":(i==1?"Adele":"Evening favourites"));
+        snprintf(catalogue[0].uri,sizeof(catalogue[0].uri),"navidrome://%s/1",i==0?"album":(i==1?"artist":"playlist"));
+        controller_ui_search(&ui,catalogue,1,"Navidrome","Tap a result",false,true,203+i);
+        screenshot(search_names[i]); geometry();
+        click(ui.search_rows[0]); CHECK(last_intent.type==UI_SEARCH_SELECT && last_intent.generation==203+i);
+        CHECK(!strcmp(last_intent.provider,"navidrome"));
+    }
+    controller_ui_search(&ui,NULL,0,"Navidrome","No results - try another search",false,true,206);
+    screenshot("search-empty"); geometry();
+    controller_ui_search(&ui,NULL,0,"Navidrome","Search failed - retry Search",false,false,207);
+    screenshot("search-error"); geometry();
+    controller_ui_search(&ui,NULL,0,"Navidrome","Search timed out - retry Search",false,false,208);
+    screenshot("search-timeout"); geometry();
+    catalogue[0].kind=UI_MEDIA_TRACK;
+    controller_ui_search(&ui,catalogue,1,"Navidrome","Disconnected - reconnect to search",false,false,209);
+    state.connected=false; controller_ui_update(&ui,&state);
+    before=intent_count; click(ui.search_rows[0]); CHECK(intent_count==before);
+    screenshot("search-disconnected"); geometry();
+    state.connected=true; state.can_search=false; controller_ui_update(&ui,&state);
+    CHECK(lv_obj_has_state(ui.search_rows[0],LV_STATE_DISABLED));
+    controller_ui_search(&ui,NULL,0,"Navidrome","Gateway update required for Search",false,false,210);
+    screenshot("search-unsupported"); geometry();
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    printf("PASS: %u layout and interaction checks; 126 screenshots at 480x800\n",checks);
+    printf("PASS: %u layout and interaction checks; %u screenshots at 480x800\n",checks,screenshots);
     free(album_packet); free(generic_packet);
     return 0;
 }
