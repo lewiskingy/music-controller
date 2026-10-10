@@ -76,10 +76,12 @@ def main():
     render_all(out)
     for name in ('ASSEMBLY.md','README.md','geometry.py','build.py','render.py','requirements.txt'):
         shutil.copyfile(ROOT/name,out/name)
-    (out/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in sorted(out.iterdir()) if p.is_file() and p.name not in ('SHA256SUMS','print-package.zip','print-package.zip.sha256')))
+    (out/'README.md').write_text((out/'README.md').read_text().replace('previews/assembled.png','assembled.png'))
+    shutil.copytree(ROOT/'reference',out/'reference',dirs_exist_ok=True)
+    (out/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out)}\n' for p in sorted(out.rglob('*')) if p.is_file() and p.name not in ('SHA256SUMS','print-package.zip','print-package.zip.sha256')))
     with zipfile.ZipFile(out/'print-package.zip','w',zipfile.ZIP_DEFLATED) as archive:
-        for p in sorted(out.iterdir()):
-            if p.is_file() and p.name not in ('print-package.zip','print-package.zip.sha256'):archive.write(p,'music-controller-enclosure/'+p.name)
+        for p in sorted(out.rglob('*')):
+            if p.is_file() and p.name not in ('print-package.zip','print-package.zip.sha256'):archive.write(p,'music-controller-enclosure/'+str(p.relative_to(out)))
     (out/'print-package.zip.sha256').write_text(f"{hashlib.sha256((out/'print-package.zip').read_bytes()).hexdigest()}  print-package.zip\n")
     print(f'Built and validated {len(parts)} parts; renders and print package: {out}',flush=True)
 
