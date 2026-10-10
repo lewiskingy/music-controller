@@ -1,0 +1,87 @@
+name: Enclosure CAD and renders
+on:
+  pull_request:
+    paths:
+      - 'hardware/enclosure/**'
+      - '.github/workflows/enclosure.yml'
+  push:
+    branches: [main]
+    tags: ['enclosure-v*']
+    paths:
+      - 'hardware/enclosure/**'
+      - '.github/workflows/enclosure.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: hardware/enclosure/requirements.txt
+      - name: Install CAD and rendering dependencies
+        run: python -m pip install -r hardware/enclosure/requirements.txt
+      - name: Verify portrait mounting, contact alignment and dock key
+        run: python hardware/enclosure/test_geometry.py -v
+      - name: Build, check board clearance and render PNGs
+        run: python hardware/enclosure/build.py --output dist/enclosure --check-board
+      - name: Upload print files and CAD
+        id: print-files
+        uses: actions/upload-artifact@v4
+        with:
+          name: controller-enclosure-${{ github.sha }}
+          path: dist/enclosure/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload rendered previews
+        id: renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: controller-enclosure-renders-${{ github.sha }}
+          path: dist/enclosure/*.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Link downloadable outputs
+        env:
+          PRINT_URL: ${{ steps.print-files.outputs.artifact-url }}
+          RENDER_URL: ${{ steps.renders.outputs.artifact-url }}
+        run: |
+          {
+            echo '## Enclosure and dock'
+            echo
+            echo "[Print files, CAD and assembly instructions]($PRINT_URL)"
+            echo
+            echo "[Rendered PNG previews]($RENDER_URL)"
+            echo
+            echo 'CAD/mesh/board-clearance checks passed. Physical fit and selected battery/contact hardware still need checking.'
+          } >> "$GITHUB_STEP_SUMMARY"
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/enclosure-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: controller-enclosure-${{ github.sha }}
+          path: dist/enclosure
+      - name: Publish versioned hardware release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^enclosure-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected enclosure-vX.Y.Z'; exit 1; }
+          gh release create "$TAG" --verify-tag --latest=false \
+            dist/enclosure/print-package.zip dist/enclosure/print-package.zip.sha256 dist/enclosure/SHA256SUMS \
+            dist/enclosure/case.png dist/enclosure/docked.png \
+            dist/enclosure/assembled.png dist/enclosure/exploded.png dist/enclosure/rear.png \
+            --title "Enclosure $TAG" \
+            --notes 'Printable ESP32-S3-Touch-LCD-4.3 portrait case and keyed charging cradle. Includes STL/STEP, PNG previews and assembly instructions. CAD validated; physical fit, battery and contact hardware require checking. See hardware/enclosure/README.md.'
