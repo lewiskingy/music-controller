@@ -17,3 +17,6 @@ __pycache__/
 firmware/esp32/controller-nvs.bin
 firmware/esp32/*-nvs.bin
 firmware/esp32/config.csv
+
+# Local enclosure CAD environment
+.venv-enclosure/
