@@ -19,6 +19,12 @@ class PortraitGeometryTests(unittest.TestCase):
                 self.assertTrue(any(abs(actual.y-v)<1e-6 for v in (-39,59)))
                 self.assertAlmostEqual(actual.z,14.8)
 
+    def test_lower_screw_heads_clear_rear_cradle_wall(self):
+        for x in (-36,36):
+            head=(cq.Workplane('XZ').center(x,10).circle(3).extrude(-.7)
+                  .translate((0,DEPTH/2,0)).val())
+            self.assertLess(head.intersect(dock.val()).Volume(),1e-4)
+
     def test_contacts_align_with_dock_and_reversed_insertion_is_blocked(self):
         for x in CONTACT_X:
             source=cq.Workplane('XY').sphere(.1).translate((x,-H/2,CONTACT_Z))

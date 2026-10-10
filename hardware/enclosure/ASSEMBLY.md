@@ -35,7 +35,7 @@ Model-to-case transform: translate X by −0.05 and Y by +2.47; reflect Z and tr
 | Battery tray inside | 44 × 38 × 12 mm; assumed 103440 pack approximately 40 × 34 × 10 mm |
 | Portrait dock base | **96 × 96 mm**, 6 mm floor; overall height 58 mm |
 | Dock slot | 80.8 mm wide × 39.8 mm deep; case bottom rests at dock Z=6 |
-| Rear cradle support | 52 mm above floor; front support has a USB service relief |
+| Rear cradle support | 52 mm above floor; front support has a USB service relief; rear has lower screw-head clearance pockets |
 | Contacts | Bottom short edge behind the USB opening, centres 14 mm apart |
 | Dock key | Asymmetric notch and peg beside contacts; 0.4 mm side/depth clearance |
 
@@ -43,7 +43,7 @@ There is no separate board carrier or loose mounting spacer: the rear cover's fo
 
 ## Assembly: USB-only dry fit first
 
-1. Dry-fit plastic parts without electronics. Four **M3 × 25 mm** screws pass through the back and extension into front 2.5 mm pilots. Tap carefully for machine screws or use appropriate plastic-thread screws. The shallow head counterbores may leave heads protruding. Do not overtighten.
+1. Dry-fit plastic parts without electronics. Four **M3 × 25 mm** screws pass through the back and extension into front 2.5 mm pilots. Tap carefully for machine screws or use appropriate plastic-thread screws. Use low-profile button heads, at most 6 mm diameter and at most 0.7 mm protrusion after the shallow counterbore. The dock has two lower rear screw-head relief pockets; larger heads need a source adjustment. Do not overtighten.
 2. Apply approximately 0.3 mm soft tape to the front bezel bearing area, outside the visible screen. Seat the glass with USB sockets down and the model orientation above. Protect flex cables; check the window alignment.
 3. Put approximately 0.2 mm soft pads on the four rear support tips. They must meet the metal bosses, not components. Front tape plus these pads account for 0.5 mm combined clearance. Stop if the glass is stressed or the back bows; adjust only after inspecting fit.
 4. Attach the battery tray to the inside rear cover with thin removable tape, centred at **assembled X=0, Y=+10**. The tray's cable notch faces the lower USB bay after the back is flipped into its assembled position. The standalone print's notch faces +Y. Keep wires clear of the supports and screw paths. Measure the battery including protection circuit and wrapping; do not squeeze or pierce the pouch. Secure it with removable tape on a broad face.

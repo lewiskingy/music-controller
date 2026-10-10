@@ -74,7 +74,11 @@ wall_w = DOCK_SLOT_WIDTH + 6
 front_wall = box(wall_w, 3, 12, DOCK_FLOOR, y=-wall_y)
 # A centred relief keeps the lower USB service opening accessible for inspection.
 front_wall = front_wall.cut(box(50, 8, 9, 9, y=-wall_y))
-dock = dock.union(front_wall).union(box(wall_w, 3, 52, DOCK_FLOOR, y=wall_y))
+rear_wall = box(wall_w, 3, 52, DOCK_FLOOR, y=wall_y)
+# Clearance for lower rear M3 button heads: counterbores may leave 0.7 mm protruding.
+for x in (-36, 36):
+    rear_wall = rear_wall.cut(box(8, 2, 9, DOCK_FLOOR, x=x, y=20.5))
+dock = dock.union(front_wall).union(rear_wall)
 for x in (-wall_x, wall_x):
     dock = dock.union(box(3, DOCK_SLOT_DEPTH+6, 18, DOCK_FLOOR, x=x))
 dock = dock.union(box(6, 6, 3, DOCK_FLOOR, x=-KEY_X, y=KEY_Z-DEPTH/2))
