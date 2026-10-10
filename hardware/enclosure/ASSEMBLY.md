@@ -1,43 +1,72 @@
-# ESP32-S3 music controller — print package v1
+# Portrait controller case and charging dock — print and assembly guide
 
-## What to send to a printing service
-Print one each of 01_front.stl, 02_rear_extension.stl, 03_back.stl and 04_battery_tray.stl. Print either 05_contact_insert.stl (charging dock build) or 06_contact_blank.stl (USB-only build). Print one 08_dock.stl if wanted. Do not print case_assembly.step: it is an assembly reference, not a single printable part.
+## Printing-service order
 
-All dimensions are millimetres; print at 100%. PETG, 0.20 mm layers, 4 perimeters, 5 top/bottom layers, 25–30% infill, dimensional tolerance target ±0.2 mm. Keep supplied orientations for the front, extension, back, tray and dock: their largest flat face is on the bed. Rotate the contact insert/blank 90 degrees about X so its broad 24.6 × 7.6 mm face rests on the bed. No supports should be needed in those orientations. Use a brim for the back cover if needed; its four narrow compression posts must remain straight. Deburr screw pilots, slide fits and contact holes by hand. No automatic scaling or geometry repair that changes hole centres.
+Print one each of `01_front.stl`, `02_rear_extension.stl`, `03_back.stl` and `04_battery_tray.stl`. Choose **one** of `05_contact_insert.stl` (contact charging) or `06_contact_blank.stl` (USB-only). Add `08_dock.stl` for the portrait cradle. Seven alternative STL files are supplied; a complete docked build needs six printed parts.
 
-Suggested service instruction: “Please print the six selected STL files, one each, in PETG at 100% scale (mm), 0.2 mm layers, 4 walls, 25% infill. Follow orientations in README. Please check meshes and preserve dimensions. Please quote the optional dock separately.”
+All units mm; **100% scale**. PETG, 0.20 mm layers, 4 perimeters, 5 top/bottom layers, 25–30% infill, tolerance target ±0.2 mm. Keep front, extension, back, tray and dock in their supplied flat orientations, largest flat face on bed. Rotate the contact/blank insert 90° about X to put its broad 24.6 × 7.6 mm face on the bed. No supports should be required in those orientations. Use a brim for the rear cover if needed: its four tall supports must stay straight. Deburr slide fits, contact holes and screw pilots; do not automatically rescale.
 
-## Dimensions and source inspection
-Downloaded official archive: https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-S3-Touch-LCD-4in3_3D_Drawing.zip
-It contains esp32-s3-touch-lcd-4_3.stp, a Creo assembly dated 2023-12-13, containing 693 solids. This is the original 4.3 model, not the B/C variants.
+Order text: “Please print the six selected STL files in PETG, one each, at 100% scale in mm, 0.2 mm layers, 4 walls and 25–30% infill. Orient as the assembly guide specifies and preserve hole positions. Please quote the dock separately.”
 
-Official drawing: touch glass 106.10 × 67.80 mm; active display 95.54 × 54.36 mm; PCB approximately 106 × 68 mm; mounting centres 98 × 60 mm, 4 mm from PCB edges.
-STEP total bounds: X −53.000 to 53.100; Y −36.479 to 31.783; Z −12.100 to 4.800 mm. Total depth 16.90 mm, including rear connectors. The STEP includes small flexible/connector projections beyond the nominal drawing outline.
-PCB hole centres: X −48.950 / 49.050; Y −32.470 / 27.530; hole radius 2.150 mm. Metal bosses rear surface Z −7.700. Design coordinates translate X by −0.05, Y by +2.47, reflect Z and translate Z by +7.10: glass front seats at Z=2.30 and boss ends at Z=14.80. Back support ends at Z=15.00. Use soft interface pads, not rigid clamping of the glass.
+`case_assembly.step` and `docked_assembly.step` are assembled viewing references, **not** single parts to print. Editable per-part STEP files are also included.
 
-Enclosure outside: 118 × 80 × 39 mm assembled (front 23 + extension 14 + back 2). Screen cavity 107.1 × 69.3 mm. Bezel opening 97 × 56 mm, centre offset +2.4 mm in Y to match the unequal screen borders. Wide connector access on both sides also provides ventilation; this enclosure is not sealed. Four rear posts support the metal mounting bosses. Four separate enclosure screws hold the body together.
-Battery tray inside 44 × 38 × 12 mm. Assumed 103440 pack is about 40 × 34 × 10 mm, but model code is not a certified dimension. Measure the actual pack including protection circuit and wrapping; do not force a pack that does not fit. Tray is removable and can be resized in the source.
-Dock base 132 × 76 mm, maximum height 40 mm. Landscape controller stands upright. Slot 119.5 × 39.8 mm; underside key prevents front/back reversal. Contact centres are 14 mm apart. Dock contact bores and case insert bores are 3.2 mm; they are mounting pilots, not a specification for an arbitrary pogo connector.
+## Verified manufacturer geometry
 
-## Assembly — USB-only first
-1. Dry-fit all printed parts without electronics. M3 × 25 mm screws pass through the back and extension into the front's 2.5 mm pilots. Use four screws. Tap pilots carefully with an M3 tap, or use suitable plastic-thread screws. Do not overtighten. Head counterbores are shallow and heads may protrude slightly.
-2. Put approximately 0.3 mm thin soft tape on the front bezel bearing area, outside the visible display. Seat the display with its two USB sockets at the left when viewed from the rear as in the manufacturer's drawing; check active area alignment before tightening. Protect flex cables.
-3. Add roughly 0.2 mm soft pads to rear compression-post tips. The posts must meet the four metal bosses, never components. Pads/tape account for the designed 0.5 mm combined clearance. Adjust padding only after checking fit; stop if the display is under pressure or the cover bows.
-4. Attach battery tray to the centre of the back's inside face with thin mounting tape. Route leads through its notch, away from the four posts. Secure the pack with removable tape on its broad face; no screws, sharp edges or compression against the pouch. The tray provides 2 mm clearance around the assumed pack and 2 mm height clearance.
-5. Verify battery chemistry, polarity and its permitted charge current. Board documentation specifies 580 mA charging. Connect only a suitable 3.7 V single-cell pack to the PH2.0 battery connector. A fitting connector is not proof of correct polarity.
-6. Fit blank insert at bottom opening with removable tape or a small bead of adhesive. Close case with extension between shell and back. Check operation and USB charging before adding dock wiring.
+Original Waveshare **ESP32-S3-Touch-LCD-4.3**, not 4.3B/C. Source:
+https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-S3-Touch-LCD-4in3_3D_Drawing.zip
 
-## Optional contact charging
-This is a mechanical enclosure and cradle, not a preassembled electrical product. A printing service supplies plastic only. Have a maker assemble the wiring if needed.
-Required hardware: two smooth conductive contacts with 3 mm stems and approximately 5 mm heads, two spring contacts with bodies suitable for the dock's 3.2 mm bores, insulated flexible wire, strain relief, short USB-C plug/pigtail for the board, a fused/current-limited regulated 5 V USB supply, and rubber feet. Allow at least 2 A supply capacity for operation plus charging. Select actual contact hardware before committing to the dock print; included editable CAD allows bore changes.
+Pinned SHA-256: `8721fac43de47b35771c438829a3251a4c0723227d83696b5517efe7d854de15`.
+The archive contains `esp32-s3-touch-lcd-4_3.stp`, dated 2023-12-13, with 693 solids. Official glass 106.10 × 67.80 mm; active display 95.54 × 54.36 mm; PCB approximately 106 × 68 mm. Mounting pattern 98 × 60 mm. STEP PCB mounting centres: X −48.950 / 49.050, Y −32.470 / 27.530; hole radius 2.150 mm; metal bosses end at Z −7.700. Total assembly STEP bounds X −53.000..53.100, Y −36.479..31.783, Z −12.100..4.800; depth 16.90 mm including connectors.
 
-Case insert fits opening at X=0, Y=−38.5, Z=14.2 in assembly coordinates; outer contact surface lies on case underside Y=−40. Stem centres X=−7/+7, Z=18.0. Retain insert and contacts with insulating adhesive and strain-relieve wires. Keep metal heads flush; recess/adjust dock supports if heads protrude. Connect contacts only to USB plug VBUS (5 V) and GND. Do not connect dock power to BAT or 3V3. Use a proper USB power pigtail/breakout and check continuity/polarity rather than wire colour. Keep board's other USB input unplugged during dock use unless its schematic has been checked for backfeed.
+The board is physically turned 90° **with its two USB sockets towards the bottom short edge**. The portrait housing does not change firmware. PR20 uses the BSP's 90° logical rotation; confirm displayed top and physical touch alignment on the actual device before final assembly. If those differ, adjust the firmware rotation rather than wiring or mounting the dock backwards.
 
-Dock bore centres X=−7/+7, Y=−1.5; top bearing floor Z=6. Fit spring pins for approximately 0.5–1 mm compression when seated; actual travel depends on purchased parts. Route wires underneath, secure, and add feet providing at least 2 mm cable clearance. Test mechanical contact and keying unpowered first. Fix contact polarity consistently between case and dock and measure 5 V at the internal plug before connecting the board. Dock electronics need USB-C sink CC resistors if a USB-C receptacle is used; a proper 5 V USB input module includes these. Never expose battery terminals as docking contacts.
+Model-to-case transform: translate X by −0.05 and Y by +2.47; reflect Z and translate Z by +7.10; rotate 90° around Z; translate portrait Y by +10. Case coordinates are X across the portrait screen, Y upwards, Z from front to rear. Glass front Z=2.30; rear metal bosses Z=14.80. Portrait mounting centres X ±30, Y −39 / +59. Back supports end at Z=15.00. These transforms are checked automatically.
+
+## Final printed geometry
+
+| Item | Dimensions / relationship |
+|---|---|
+| Portrait enclosure | **80 × 138 × 39 mm** (width × height × depth) |
+| Depth stack | Front 23 + rear extension 14 + back 2 mm |
+| Screen cavity | 69.3 × 127.1 mm, including lower cable bay |
+| Display opening | 56 × 97 mm, centre X −2.4, Y +10 |
+| Lower USB bay | Approximately 20 mm of internal extension below the board; short-edge service opening 48 mm wide |
+| Long edges | Closed; service openings are on top and bottom short edges |
+| Battery tray inside | 44 × 38 × 12 mm; assumed 103440 pack approximately 40 × 34 × 10 mm |
+| Portrait dock base | **96 × 96 mm**, 6 mm floor; overall height 58 mm |
+| Dock slot | 80.8 mm wide × 39.8 mm deep; case bottom rests at dock Z=6 |
+| Rear cradle support | 52 mm above floor; front support has a USB service relief |
+| Contacts | Bottom short edge behind the USB opening, centres 14 mm apart |
+| Dock key | Asymmetric notch and peg beside contacts; 0.4 mm side/depth clearance |
+
+There is no separate board carrier or loose mounting spacer: the rear cover's four supports bear on soft pads on the metal bosses. The taller lower bezel houses the USB pigtail/cable bay. This is a fully printed enclosure; the earlier wooden enclosure concept is not part of these files.
+
+## Assembly: USB-only dry fit first
+
+1. Dry-fit plastic parts without electronics. Four **M3 × 25 mm** screws pass through the back and extension into front 2.5 mm pilots. Tap carefully for machine screws or use appropriate plastic-thread screws. The shallow head counterbores may leave heads protruding. Do not overtighten.
+2. Apply approximately 0.3 mm soft tape to the front bezel bearing area, outside the visible screen. Seat the glass with USB sockets down and the model orientation above. Protect flex cables; check the window alignment.
+3. Put approximately 0.2 mm soft pads on the four rear support tips. They must meet the metal bosses, not components. Front tape plus these pads account for 0.5 mm combined clearance. Stop if the glass is stressed or the back bows; adjust only after inspecting fit.
+4. Attach the battery tray to the inside rear cover with thin removable tape, centred at **assembled X=0, Y=+10**. The tray's cable notch faces the lower USB bay after the back is flipped into its assembled position. The standalone print's notch faces +Y. Keep wires clear of the supports and screw paths. Measure the battery including protection circuit and wrapping; do not squeeze or pierce the pouch. Secure it with removable tape on a broad face.
+5. Verify a suitable 3.7 V single-cell battery, its connector polarity, protection and permitted charging current. The board specifies 580 mA charging. A PH2.0 plug fitting is not proof of correct polarity. Connect the battery only to the board's battery connector.
+6. Choose blank or contact insert. It fits the bottom extension opening at **X=0, Y=−67.5, Z=28.2** (outer bottom face Y=−69). Use insulating adhesive to retain it; do not obstruct screws or contacts.
+7. Close the case, test normal USB power/charging and confirm portrait screen/touch operation before adding dock wiring.
+
+## Optional charging contacts and internal USB pigtail
+
+The cradle is plastic only. Required hardware: two smooth conductive contacts (3 mm stems, approximately 5 mm heads), two spring contacts compatible with the 3.2 mm dock bores, insulated flexible wiring, strain relief, suitable short USB-C power pigtail, fused/current-limited 5 V USB input, and rubber feet. A regulated **5 V / 2 A** supply provides operating/charging headroom. Have a maker assemble the wiring if needed.
+
+An internal plug connects the board's verified USB power input to the contacts on the same lower short edge. Use a small plug body **no longer than about 16 mm, no wider than 14 mm and no taller than 8 mm**, leaving additional wire-bend space inside the approximately 20 mm bay. Prefer a low-profile plug with a flexible lead or rearward cable exit. The CAD checks a 14 × 20 × 8 mm plug-plus-routing envelope at both socket positions. This is a clearance specification, not a claim that any commercially sold USB plug fits. Select/measure the actual pigtail before ordering. Direct wiring requires separately verifying the board's USB input schematic/pads.
+
+Case contact stem centres: **X=−7 / +7, Y=−69, Z=32**. Keep metal heads flush with the bottom surface; adjust dock bearing clearance if heads protrude. Route insulated wires through the lower bay towards the rear contacts and secure them. Contact holes are mounting pilots: adapt the source to the purchased components if necessary.
+
+The rigid case-to-dock transform is **(X,Y,Z) → (−X, Z−19.5, Y+75)**. Thus case left/right swap when viewed from the dock front. Dock bores are **X=−7 / +7, Y=+12.5**, with bearing floor Z=6. The dock key is at X=−27, Y=+10.5; its matching case notch is at X=+27, Y=−69, Z=30. Use these coordinates and continuity checks to establish polarity; do not infer it from a left/right drawing alone.
+
+Choose pin travel and installation height to give roughly **0.5–1 mm spring compression** when seated. Secure spring-pin barrels and wires; the underbase cable groove leads to the rear. Add feet providing at least 2 mm cable clearance. A USB-C input receptacle needs a proper 5 V sink module with CC resistors. The mechanical design does not supply electronics or USB negotiation components.
+
+Feed **USB VBUS 5 V and GND only**, never BAT or 3V3. Leave the second board USB power input disconnected during dock use unless the schematic has been checked for backfeed. Test docking and keying unpowered, measure correct 5 V at the internal plug, then connect the board. The key rejects reversed insertion; it does not replace electrical polarity checking. Do not expose battery terminals as docking contacts.
 
 ## Validation and limits
-CAD solid validity and one-solid-per-part checks completed during generation; STL mesh checks are supplied in mesh_check.json. Board-to-case collision volumes are in collision_check.json. Previews are rendered from the exported STL files. STEP/source files are editable and included.
-These files are print-ready geometry for a first physical fit build, not a physically tested production enclosure. Actual board revision, battery dimensions, USB plug body and purchased contact hardware still require a dry fit. The wide access openings leave room for connectors but an internal USB plug may need to exit through a side opening. Have the service/maker check that plug arrangement before wiring the dock.
 
-## Package contents
-STL print files; STEP versions; assembly STEP; rendered preview images; geometry.py and build.py; dimension drawing; source inspection JSON/text; CAD/mesh checks. The original manufacturer ZIP can be downloaded separately from the source URL above. The build fetches it for clearance checking but does not include it in the print package.
+`mesh_check.json`: solid validity and closed, manifold exported STL meshes. `collision_check.json`: manufacturer-board clearance and the two USB plug/routing envelopes (when the source-model check is run). `dock_fit_check.json`: assembled case vs cradle clearance. `test_geometry.py`: portrait mount transform, contact alignment and reversed-insertion rejection. PNGs are rendered from exported STL geometry, with the screen switched off and indicative colour/finish.
+
+These are print-ready files for a **first physical fit build**, not a physically tested production product. Verify your board revision, battery measurements, pigtail body, chosen contacts and spring travel before commissioning final assembly. A successful CAD build does not validate those purchased parts or charging behaviour.

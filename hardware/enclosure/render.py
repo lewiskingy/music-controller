@@ -2,6 +2,7 @@
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
+from geometry import BOARD_Y, H, DEPTH, CONTACT_INSERT_Z, DOCK_FLOOR
 
 
 def read_stl(path):
@@ -57,30 +58,36 @@ def rasterize(items, eye, size=(1000, 850)):
 
 def render_all(output):
     output=Path(output); body=[]
-    for name in ('01_front','02_rear_extension','03_back'):
+    for name in ('01_front','02_rear_extension','03_back','05_contact_insert'):
         a=read_stl(output/(name+'.stl'))
         if name=='02_rear_extension': a[:,:,2]+=23
-        if name=='03_back': a[:,:,1]*=-1; a[:,:,2]=39-a[:,:,2]
+        if name=='03_back': a[:,:,1]*=-1; a[:,:,2]=DEPTH-a[:,:,2]
+        if name=='05_contact_insert': a[:,:,1]+=-H/2+1.5; a[:,:,2]+=CONTACT_INSERT_Z
         body.append((a, [105,133,153]))
-    body.append((rectangle(-53.05,53.05,-33.9,33.9,2.3), [18,25,33]))
-    body.append((rectangle(-47.7,47.7,-24.78,29.58,2.29), [24,38,49]))
+    body.append((rectangle(-33.9,33.9,-53.05+BOARD_Y,53.05+BOARD_Y,2.3), [18,25,33]))
+    body.append((rectangle(-29.58,24.78,-47.7+BOARD_Y,47.7+BOARD_Y,2.29), [24,38,49]))
     views=[]
     for docked in (False,True):
         items=[]
         for vertices,colour in body:
             a=vertices.copy()
-            if docked: a=np.stack((a[:,:,0],a[:,:,2]-19.5,a[:,:,1]+46),axis=2)
-            else: a[:,:,2]=39-a[:,:,2]
+            if docked: a=np.stack((-a[:,:,0],a[:,:,2]-DEPTH/2,a[:,:,1]+H/2+DOCK_FLOOR),axis=2)
+            else: a[:,:,2]=DEPTH-a[:,:,2]
             items.append((a,colour))
         if docked: items.append((read_stl(output/'08_dock.stl'), [105,133,153]))
         img=rasterize(items, [.6,-1,.45] if docked else [.65,-1,1.25])
-        ImageDraw.Draw(img).text((35,20),'Controller in dock' if docked else 'Controller case',fill='#303a44')
+        ImageDraw.Draw(img).text((35,20),'Portrait controller in dock' if docked else 'Portrait controller case',fill='#303a44')
         img.save(output/('docked.png' if docked else 'case.png'))
         views.append(img)
     canvas=Image.new('RGB',(2000,900),'#eef0f3')
     for i,img in enumerate(views):canvas.paste(img,(i*1000,25))
     ImageDraw.Draw(canvas).text((35,875),'Actual CAD geometry; colour/finish indicative. Screen switched off.',fill='#53616b')
     canvas.save(output/'assembled.png')
+    # Rear view shows the closed long sides and lower USB cable bay.
+    rear=[]
+    for vertices,colour in body:
+        a=vertices.copy(); a[:,:,2]=DEPTH-a[:,:,2]; rear.append((a,colour))
+    rasterize(rear,[.65,-1,-1.1]).save(output/'rear.png')
     items=[(read_stl(output/(name+'.stl')), [105,133,153]) for name in ('01_front','02_rear_extension','03_back')]
     # Explode along the case depth, with correct assembly orientation.
     items[1][0][:,:,2]+=32

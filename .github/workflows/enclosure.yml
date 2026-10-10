@@ -26,6 +26,8 @@ jobs:
           cache-dependency-path: hardware/enclosure/requirements.txt
       - name: Install CAD and rendering dependencies
         run: python -m pip install -r hardware/enclosure/requirements.txt
+      - name: Verify portrait mounting, contact alignment and dock key
+        run: python hardware/enclosure/test_geometry.py -v
       - name: Build, check board clearance and render PNGs
         run: python hardware/enclosure/build.py --output dist/enclosure --check-board
       - name: Upload print files and CAD
@@ -80,6 +82,6 @@ jobs:
           gh release create "$TAG" --verify-tag --latest=false \
             dist/enclosure/print-package.zip dist/enclosure/print-package.zip.sha256 dist/enclosure/SHA256SUMS \
             dist/enclosure/case.png dist/enclosure/docked.png \
-            dist/enclosure/assembled.png dist/enclosure/exploded.png \
+            dist/enclosure/assembled.png dist/enclosure/exploded.png dist/enclosure/rear.png \
             --title "Enclosure $TAG" \
-            --notes 'Printable ESP32-S3-Touch-LCD-4.3 case and keyed charging cradle. Includes STL/STEP, PNG previews and assembly instructions. CAD validated; physical fit, battery and contact hardware require checking. See hardware/enclosure/README.md.'
+            --notes 'Printable ESP32-S3-Touch-LCD-4.3 portrait case and keyed charging cradle. Includes STL/STEP, PNG previews and assembly instructions. CAD validated; physical fit, battery and contact hardware require checking. See hardware/enclosure/README.md.'

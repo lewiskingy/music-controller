@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 import cadquery as cq
 import numpy as np
-from geometry import parts, assembled_parts
+from geometry import parts, assembled_parts, manufacturer_to_case, case_to_dock, dock, DEPTH, H
 from render import read_stl, render_all
 
 ROOT=Path(__file__).resolve().parent
@@ -40,13 +40,18 @@ def check_board(output,archive=None):
         model_path=output/'manufacturer.stp'
         model_path.write_bytes(z.read('esp32-s3-touch-lcd-4_3.stp'))
     print('Importing verified manufacturer STEP model (may take several minutes)',flush=True)
-    model=cq.importers.importStep(str(model_path)).val().mirror('XY').translate((-.05,2.47,7.1))
+    model=manufacturer_to_case(cq.importers.importStep(str(model_path)).val())
     results={}
-    for name,part in assembled_parts().items():
+    for name,part in assembled_parts(include_insert=True).items():
         volume=part.val().intersect(model).Volume()
         results[name]=round(volume,6)
         print(f'{name}: collision volume {volume:.6f} mm3',flush=True)
         if volume>1e-4: raise ValueError(f'{name} collides with board: {volume} mm3')
+    shell=cq.Compound.makeCompound([p.val() for p in assembled_parts(include_insert=True).values()])
+    for label,x in [('usb_plug_1_envelope',-17.6),('usb_plug_2_envelope',-1.7)]:
+        plug=cq.Workplane('XY').box(14,20,8).translate((x,-52.5,15)).val()
+        results[label]=round(plug.intersect(shell).Volume(),6)
+        if results[label]>1e-4: raise ValueError(f'{label} intersects case')
     model_path.unlink()
     (output/'collision_check.json').write_text(json.dumps(results,indent=2)+'\n')
     return results
@@ -69,12 +74,18 @@ def main():
         cq.exporters.export(part,str(out/(name+'.step')))
         checks[name+'.stl']=check_mesh(out/(name+'.stl'))
         print(f'{name}: solid and mesh checks passed',flush=True)
-    assembly=cq.Compound.makeCompound([p.val() for p in assembled_parts().values()])
+    assembled=assembled_parts(include_insert=True)
+    assembly=cq.Compound.makeCompound([p.val() for p in assembled.values()])
     cq.exporters.export(assembly,str(out/'case_assembly.step'))
+    docked=cq.Compound.makeCompound([case_to_dock(p).val() for p in assembled.values()]+[dock.val()])
+    cq.exporters.export(docked,str(out/'docked_assembly.step'))
+    dock_volume=sum(case_to_dock(p).val().intersect(dock.val()).Volume() for p in assembled.values())
+    if dock_volume>1e-4: raise ValueError(f'Case collides with dock: {dock_volume} mm3')
+    (out/'dock_fit_check.json').write_text(json.dumps({'collision_volume_mm3':round(dock_volume,6),'portrait_case_mm':[80,H,DEPTH]},indent=2)+'\n')
     (out/'mesh_check.json').write_text(json.dumps(checks,indent=2)+'\n')
     if args.check_board or args.board_archive: check_board(out,args.board_archive)
     render_all(out)
-    for name in ('ASSEMBLY.md','README.md','geometry.py','build.py','render.py','requirements.txt'):
+    for name in ('ASSEMBLY.md','README.md','geometry.py','build.py','render.py','test_geometry.py','requirements.txt'):
         shutil.copyfile(ROOT/name,out/name)
     (out/'README.md').write_text((out/'README.md').read_text().replace('previews/assembled.png','assembled.png'))
     shutil.copytree(ROOT/'reference',out/'reference',dirs_exist_ok=True)
