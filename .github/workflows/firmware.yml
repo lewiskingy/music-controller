@@ -3,17 +3,37 @@ on:
   pull_request:
     paths:
       - 'firmware/esp32/**'
+      - 'tests/test_esp32*.py'
+      - 'tests/test_playback_policy.py'
+      - 'tests/native-ui/**'
+      - 'contracts/**'
       - '.github/workflows/firmware.yml'
+      - '!firmware/esp32/**/*.md'
   push:
     branches: [main]
     paths:
       - 'firmware/esp32/**'
+      - 'tests/test_esp32*.py'
+      - 'tests/test_playback_policy.py'
+      - 'tests/native-ui/**'
+      - 'contracts/**'
       - '.github/workflows/firmware.yml'
+      - '!firmware/esp32/**/*.md'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==8.4.2
+      - run: python -m pytest tests --ignore=tests/prototype -q
   build:
+    needs: test
     runs-on: ubuntu-latest
     container: espressif/idf:v5.4.2
     defaults:

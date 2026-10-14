@@ -1,0 +1,51 @@
+name: Music Controller gateway
+on:
+  pull_request:
+    paths:
+      - 'gateway/**'
+      - 'contracts/**'
+      - '.github/workflows/gateway.yml'
+      - '!gateway/**/*.md'
+  push:
+    branches: [main]
+    paths:
+      - 'gateway/**'
+      - 'contracts/**'
+      - '.github/workflows/gateway.yml'
+      - '!gateway/**/*.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: gateway/requirements.txt
+      - name: Install gateway dependencies
+        run: python -m pip install -r gateway/requirements.txt pytest==8.4.2
+      - name: Test validation, authentication and relay against a fake Music Assistant
+        run: python -m pytest gateway/tests -q
+      - name: Validate example deployment
+        run: docker compose --env-file gateway/.env.example -f gateway/compose.yml --profile web config --quiet
+      - name: Validate frontend routing
+        run: docker run --rm -e CONTROLLER_HOST=controller.example.net -e MA_HTTP_UPSTREAM=host.docker.internal:8095 -v "$PWD/gateway/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 caddy validate --config /etc/caddy/Caddyfile
+      - name: Build gateway container
+        run: docker build -t music-controller-gateway:ci gateway
+      - name: Smoke test container health
+        run: |
+          set -euo pipefail
+          docker run -d --name gateway-smoke -e MA_USERNAME=test -e MA_PASSWORD=test music-controller-gateway:ci
+          trap 'docker rm -f gateway-smoke' EXIT
+          for attempt in {1..20}; do
+            if docker exec gateway-smoke python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs gateway-smoke
+          exit 1

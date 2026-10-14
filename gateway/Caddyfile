@@ -1,0 +1,28 @@
+# Example HTTPS frontend. Publish only on a trusted LAN address (compose.yml).
+# The ESP32 requires a certificate issued by a CA in its ESP-IDF trust bundle.
+{$CONTROLLER_HOST} {
+    handle /controller/device/ws {
+        rewrite * /device/ws
+        reverse_proxy gateway:8080
+    }
+    handle /controller/device/artwork/* {
+        uri strip_prefix /controller
+        reverse_proxy gateway:8080
+    }
+    handle /controller/ma/ws {
+        rewrite * /ws
+        reverse_proxy gateway:8080
+    }
+    handle /controller/ma/image {
+        rewrite * /image
+        reverse_proxy {$MA_HTTP_UPSTREAM}
+    }
+    redir /controller /controller/
+    handle_path /controller/* {
+        root * /srv/controller
+        file_server
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

@@ -1,0 +1,42 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    environment:
+      MA_WS_URL: ${MA_WS_URL:?Set MA_WS_URL in .env}
+      MA_USERNAME: ${MA_USERNAME:?Set MA_USERNAME in .env}
+      MA_PASSWORD: ${MA_PASSWORD:?Set MA_PASSWORD in .env}
+      CONTROLLER_DEVICE_TOKEN: ${CONTROLLER_DEVICE_TOKEN:?Set CONTROLLER_DEVICE_TOKEN in .env}
+      CONTROLLER_ORIGIN: ${CONTROLLER_ORIGIN:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - '127.0.0.1:8080:8080'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  frontend:
+    profiles: [web]
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      CONTROLLER_HOST: ${CONTROLLER_HOST:?Set CONTROLLER_HOST in .env}
+      MA_HTTP_UPSTREAM: ${MA_HTTP_UPSTREAM:?Set MA_HTTP_UPSTREAM in .env}
+    ports:
+      - '${CONTROLLER_BIND_IP:-127.0.0.1}:443:443'
+      - '${CONTROLLER_BIND_IP:-127.0.0.1}:80:80'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../prototype:/srv/controller:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      gateway:
+        condition: service_healthy
+volumes:
+  caddy_data:
+  caddy_config:
