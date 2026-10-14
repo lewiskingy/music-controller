@@ -38,7 +38,7 @@ The browser currently connects through an **Atlas-hosted, LAN-only, server-authe
 - [contracts/music-assistant.md](contracts/music-assistant.md) — API spike and state/command contract
 - [prototype/](prototype/) — static HTML/CSS/JS touch UX prototype
 - [firmware/esp32/](firmware/esp32/) — future ESP-IDF/LVGL implementation
-- [hardware/](hardware/) — future enclosure and dock design
+- [hardware/enclosure/](hardware/enclosure/) — printable enclosure/dock CAD, assembly guide and automated builds/renders
 
 ## Run the prototype
 
