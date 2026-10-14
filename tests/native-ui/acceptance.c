@@ -445,6 +445,28 @@ int main(int argc,char **argv) {
     before=intent_count; click(ui.volume_up); CHECK(intent_count==before+1 && last_intent.type==UI_VOLUME_UP);
     click(ui.settings_button); geometry();
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
+    unsigned char *backdrop=calloc(1,8+480*800*2);
+    CHECK(backdrop!=NULL);
+    memcpy(backdrop,"MCBG\xe0\x01\x20\x03",8);
+    for(unsigned y=0;y<800;y++) for(unsigned x=0;x<480;x++) {
+        unsigned v=((x/16)%2 ? 0x780f : 0xc300) + (y/32)%16;
+        backdrop[8+(y*480+x)*2]=v&255; backdrop[9+(y*480+x)*2]=v>>8;
+    }
+    CHECK(!controller_ui_set_backdrop(&ui,backdrop,12));
+    CHECK(controller_ui_set_backdrop(&ui,backdrop,8+480*800*2));
+    CHECK(ui.backdrop_loaded && !ui.backdrop_enabled);
+    controller_ui_enable_backdrop(&ui,true);
+    CHECK(lv_obj_get_style_bg_img_src(ui.root,0)==&ui.backdrop_descriptor);
+    controller_ui_show(&ui,UI_PLAYING); screenshot("backdrop-playing"); geometry();
+    controller_ui_show(&ui,UI_SETTINGS); screenshot("backdrop-settings"); geometry();
+    controller_ui_set_theme(&ui,3,true);
+    CHECK(ui.backdrop_enabled && ui.palette==3 && ui.light);
+    screenshot("backdrop-light-settings"); geometry();
+    controller_ui_enable_backdrop(&ui,false);
+    CHECK(lv_obj_get_style_bg_img_src(ui.root,0)==NULL);
+    controller_ui_set_backdrop(&ui,NULL,0);
+    CHECK(!ui.backdrop_loaded && ui.backdrop_pixels==NULL);
+    free(backdrop);
     printf("PASS: %u layout and interaction checks; %u screenshots at 480x800\n",checks,screenshots);
     free(album_packet); free(generic_packet);
     return 0;

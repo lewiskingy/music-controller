@@ -70,6 +70,11 @@ typedef struct {
     lv_color_t *art_pixels, *thumbnail_pixels;
     char art_id[65];
     bool art_loaded;
+    lv_obj_t *backdrop_button;
+    lv_img_dsc_t backdrop_descriptor;
+    lv_color_t *backdrop_pixels;
+    bool backdrop_enabled, backdrop_loaded;
+    void (*backdrop_cb)(bool enabled);
     unsigned palette;
     bool light;
     void (*theme_cb)(unsigned palette, bool light);
@@ -106,3 +111,6 @@ void controller_ui_search(controller_ui_t *ui, const ui_media_item_t *items, uns
 /* Radio selection: clicking the selected row cannot clear it. */
 void controller_ui_choose_source(lv_obj_t *list, lv_obj_t *chosen);
 lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected);
+
+void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled);
+bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length);

@@ -1,92 +1,85 @@
-# ESP32-S3 firmware foundation
+# ESP32-S3 touchscreen firmware
 
-**Status:** LCD/touch bring-up is proven on hardware. This branch adds a first **read-only connected Now Playing** firmware: Wi-Fi, TLS WebSocket to the Atlas device gateway, player/queue state and LVGL text. It does not yet implement artwork, queue browsing, transport buttons or OTA.
+ESP-IDF v5.4.2/LVGL firmware for the Waveshare **ESP32-S3-Touch-LCD-4.3**, 800×480 GT911 touch variant with 16 MB flash. Check your exact PCB/board model; the separate 4-inch 480×480 device is not interchangeable.
 
-## Build
+## Current features
 
-Use ESP-IDF v5.4.2 (also pinned in CI):
+- LCD/touch, Wi-Fi and certificate-verified WSS through the companion gateway.
+- Live Now Playing/player and queue metadata, player selection persisted to NVS.
+- Play/Pause, Stop, Next, Previous and volume stepping at 5% boundaries.
+- Separate full-screen Providers selection, explicit Save and persistence across reset. It does not yet filter browsing/search.
+- Exclusive LVGL screens and bounded WebSocket fragment reassembly (128 KiB).
 
-```bash
+Sonos Pause is disabled while playing because of observed queue hopping; use Stop. Native artwork, Queue/Browse/Search screens, battery/sleep management and signed OTA delivery remain future work. Two 5 MB OTA slots are reserved; OTA is not implemented yet. Source/CI validation does not replace testing your particular hardware and Music Assistant version.
+
+## Gateway prerequisite
+
+Deploy [gateway/](../../gateway/README.md) on your own host, with a dedicated Music Assistant account, random `CONTROLLER_DEVICE_TOKEN` and trusted HTTPS frontend. The device holds the separate device token, never the Music Assistant account password. Atlas is an existing deployment option, not required.
+
+Your Wi-Fi DNS must resolve the WSS hostname to the frontend. Its certificate must be trusted by the ESP-IDF CA bundle. Do not bypass verification. The provisioner retains the existing Atlas URL as a convenience default; **enter your own URL** such as `wss://controller.example.net/controller/device/ws` for other installations.
+
+## Build from source
+
+Activate an installed ESP-IDF **v5.4.2** environment, then from the repository root:
+
+```sh
 . "$HOME/esp/esp-idf/export.sh"
 cd firmware/esp32
 idf.py set-target esp32s3
 idf.py build
-```
-
-The custom partition table reserves two 5 MB OTA slots for future rollback. Confirm board flash size and exact model before flashing.
-
-## First device installation
-
-After checking Waveshare SKU/PCB revision, flash size and data-capable USB port:
-
-```bash
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-Replace the port with the detected one. Expected serial log: `Music Controller firmware foundation`, ESP-IDF version and a notice that display/touch are not yet initialised. Exit monitor with Ctrl+].
+Substitute your serial port. The pinned BSP `bobscott45/waveshare_esp32_s3_touch_lcd_4_3@1.0.7` supplies display/touch pin assignments; LVGL is pinned to 8.3.11. Dependencies are in `main/idf_component.yml`. Exit monitor with Ctrl+]. Start with USB power and leave the battery disconnected until hardware/power suitability is confirmed.
 
-CI uploads bootloader, partition table, application binary, flash arguments and checksums as **workflow artifacts**, not GitHub Releases. The web prototype's `latest` release remains separate.
+CI builds the same IDF version and uploads bootloader, partition table, application, flash arguments, checksums and `music-controller-full-flash.bin` as an Actions artifact. This is separate from tagged browser-prototype releases.
 
-Next: confirm hardware, integrate exact Waveshare display/touch BSP and LVGL, show one focused 800×480 screen, then Wi-Fi/gateway and OTA. Never commit credentials or private network configuration.
+## Flash a prebuilt artifact (Windows)
 
-## Windows laptop: flash a prebuilt GitHub Actions artifact
-
-After CI succeeds, open the firmware workflow run in GitHub Actions and
-download its `music-controller-esp32s3-...` artifact ZIP. Extract it locally.
-Use the **USB-C port labelled USB** on the Waveshare board and a data-capable
-cable. Leave the battery disconnected for the initial test.
-
-Install Python 3 and the official Espressif flashing utility on Windows:
+Download the successful **ESP32 firmware** Actions run's `music-controller-esp32s3-...` ZIP and extract it. Connect the board's USB port with a data-capable cable and identify the COM port in Device Manager.
 
 ```powershell
 py -m pip install --upgrade esptool
+py -m esptool --chip esp32s3 --port COM5 flash-id
+py -m esptool --chip esp32s3 --port COM5 --baud 460800 write-flash 0x0 music-controller-full-flash.bin
 ```
 
-Identify the board's COM port in Windows Device Manager. From PowerShell in
-the extracted artifact directory, substitute the correct port:
+Confirm the correct board and **16 MB** flash before writing. If connection fails, hold BOOT while pressing RESET and retry. Flashing replaces the vendor demonstration firmware; back it up first if needed. Never write the application-only `music_controller.bin` at `0x0`; use the merged image there. The application partition starts at `0x20000` in this repository's partition table.
+
+## Provision private NVS
+
+Run locally from your checkout, with ESP-IDF v5.4.2 activated (`IDF_PATH` set):
+
+```sh
+python firmware/esp32/provision.py
+```
+
+On a Windows machine without the full toolchain, clone the v5.4.2 IDF source and install the NVS generator dependencies:
 
 ```powershell
-py -m esptool --chip esp32s3 --port COM5 flash_id
-py -m esptool --chip esp32s3 --port COM5 --baud 460800 write_flash 0x0 music-controller-full-flash.bin
+git clone --depth 1 --branch v5.4.2 https://github.com/espressif/esp-idf.git esp-idf-5.4.2
+$env:IDF_PATH=(Resolve-Path .\esp-idf-5.4.2).Path
+py -m pip install cryptography
+py firmware/esp32/provision.py
 ```
 
-The first command confirms a responding ESP32-S3 and detects flash capacity.
-**Only flash if the reported flash capacity is 16 MB** and the model matches
-the expected Waveshare ESP32-S3-LCD-4.3. If Windows cannot connect, hold
-BOOT while pressing RESET to enter download mode, then retry. Never use
-`erase_flash` for this first test.
+Enter Wi-Fi SSID/password, **your certificate-verified WSS gateway URL**, matching device token and optionally the exact MA player ID. Without a player ID, firmware selects an available player. The tool writes private `firmware/esp32/controller-nvs.bin` (24 KiB) containing Wi-Fi/device credentials. It is ignored by Git and must never be uploaded or attached to an issue.
 
-For serial logging, install an appropriate serial terminal or the ESP-IDF
-monitor. The separate USB-C port marked UART provides a USB-to-serial bridge;
-the USB port may expose the ESP32-S3's native USB serial/JTAG interface
-depending on the firmware configuration. The screen staying blank with this
-skeleton is **expected**.
+After flashing full firmware, flash NVS at `0x9000`:
 
-**Caution:** Flashing overwrites existing vendor demonstration firmware.
-If preserving the demo matters, back up flash first with esptool or obtain
-the official Waveshare recovery image.
+```powershell
+py -m esptool --chip esp32s3 --port COM5 write-flash 0x9000 firmware/esp32/controller-nvs.bin
+```
 
-## LCD + touch bring-up milestone
+Adjust paths if the extracted artifact and checkout are in different directories. **Full merged images may overwrite the NVS region: always flash private NVS afterwards.** Resetting the original NVS also restores its originally provisioned preferences; on-device player/provider choices made since then can be lost. Application-only updates can preserve NVS if written at the correct application offset.
 
-The next build uses the pinned third-party Waveshare 4.3-inch board support
-component `bobscott45/waveshare_esp32_s3_touch_lcd_4_3@1.0.7` and LVGL
-`8.3.11`. It initialises the RGB panel, GT911 touch and backlight, and
-shows a static **Now Playing** placeholder and a touchable button. This is
-a hardware bring-up image, not a connected media controller.
+## Hardware acceptance and diagnostics
 
-**Before flashing:** confirm the board is the **4.3-inch 800×480 GT911**
-variant (not the separate 4-inch 480×480 product). The previously flashed
-USB serial skeleton remains the recovery baseline. Leave the battery
-disconnected and power from USB.
+Verify live metadata, player selection across reset, transport/volume on the correct output, Providers → change → Save across reset, and recovery after Wi-Fi/gateway interruption. The outer screen never scrolls or stacks primary views.
 
-CI must pass before downloading its merged flash image. After flashing,
-check for `LCD and LVGL initialised` in the serial log. Expected: a dark
-Now Playing screen and a button. Touch should show LVGL's pressed visual
-feedback; no music control commands are sent yet. Report any reset loop,
-white screen, touch offset or display flicker with the serial log.
+Use `idf.py monitor`, a serial terminal or `py -m serial.tools.miniterm COM5 115200` (requires pyserial) to inspect logs. Look for LCD/LVGL initialisation, DHCP, WebSocket handshake, `gateway/ready`, MA responses and heartbeat/reset reasons. A blank panel before networking points to display/board bring-up; connection failures need DNS/TLS/token/upstream checks. Never post the private NVS image or credentials with diagnostics.
 
-The component is pinned for repeatable builds. Board pin assignments are
-supplied by the BSP rather than copied into our application.
+## Tests and CI
 
 ## Connected Now Playing — private configuration
 
@@ -462,3 +455,15 @@ Browse and Search hide the right VolumeDock and expand their content panes to 48
 ### Simplified Search keyboard
 
 The full-width default map contains lowercase letters only, plus Symbols, Space, Backspace and Search. Symbols switches to digits 0–9 and £ $ # & apostrophe, hyphen, period, comma, slash, ! ? parentheses, + @ and colon; Letters returns to the alphabet without losing text. No case toggles or cursor-arrow keys are shown. Reopening the keyboard starts with letters. The gateway applies Unicode casefold to submitted queries and to the older-server library fallback, retaining punctuation. The stock font is supplemented with an original pound-sign glyph so £ renders in both the keyboard and input. Acceptance covers symbol entry, UTF-8 backspace, mode switching, Search submission and case-normalized gateway requests; screenshots total 46.
+
+### Gateway backdrop
+
+Settings includes a separate **Backdrop: off / gateway** toggle, persisted in NVS
+and off by default. Upload at the gateway's `/backdrop` page (or
+`/controller/backdrop` through Caddy). The 480 × 800 RGB565 image is downloaded by
+a dedicated worker every 15 seconds with conditional ETag requests; UI and state
+locks are never held during transfer. The decoded image remains in PSRAM during
+network interruptions and is cleared when disabled or removed. This uses roughly
+768 KiB for the retained pixels plus a temporary 768 KiB transfer buffer. Plain
+colour themes remain independent; opaque control cards and translucent palette
+backgrounds keep labels legible. The gateway prepares cropping and brightness.

@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'firmware/esp32/**'
+      - 'tests/test_esp32*.py'
+      - 'tests/test_playback_policy.py'
+      - 'tests/native-ui/**'
+      - 'contracts/**'
       - '.github/workflows/firmware.yml'
       - 'tests/native-ui/**'
       - 'tests/test_playback_policy.py'
@@ -13,6 +17,10 @@ on:
     branches: [main]
     paths:
       - 'firmware/esp32/**'
+      - 'tests/test_esp32*.py'
+      - 'tests/test_playback_policy.py'
+      - 'tests/native-ui/**'
+      - 'contracts/**'
       - '.github/workflows/firmware.yml'
       - 'tests/native-ui/**'
       - 'tests/test_playback_policy.py'
@@ -67,6 +75,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
   build:
+    needs: [contracts, ui-acceptance]
     runs-on: ubuntu-latest
     container: espressif/idf:v5.4.2
     defaults:

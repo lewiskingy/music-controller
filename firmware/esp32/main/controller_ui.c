@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "controller_ui.h"
 #include "search_keyboard_font.h"
@@ -73,6 +74,11 @@ static void theme_clicked(lv_event_t *event) {
     if(ui->theme_cb) ui->theme_cb(palette,light);
 }
 
+static void backdrop_clicked(lv_event_t *event) {
+    controller_ui_t *ui = lv_event_get_user_data(event);
+    controller_ui_enable_backdrop(ui, !ui->backdrop_enabled);
+    if (ui->backdrop_cb) ui->backdrop_cb(ui->backdrop_enabled);
+}
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned color) {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_set_pos(obj, x, y);
@@ -81,7 +87,7 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned co
     lv_obj_set_style_border_width(obj, 0, 0);
     lv_obj_set_style_radius(obj, 0, 0);
     bg(obj, color, 0);
-    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    if (color != BG) lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
@@ -301,6 +307,7 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->action_cb = action_cb;
     controller_ui_set_theme(ui,0,false);
     bg(root, BG, 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     fg(root, TEXT, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
@@ -459,7 +466,8 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
         bg(ui->mode_buttons[i],ACCENT,LV_STATE_CHECKED);
         fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
     }
-    ui->sources_button=button(ui->settings_content,"Music provider",24,414,352,56,providers_cb,NULL);
+    ui->backdrop_button=button(ui->settings_content,"Backdrop: off",24,382,352,48,backdrop_clicked,ui);
+    ui->sources_button=button(ui->settings_content,"Music provider",24,446,352,56,providers_cb,NULL);
     controller_ui_set_theme(ui,0,false);
     controller_ui_show(ui, UI_PLAYING);
 }
@@ -693,4 +701,39 @@ lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected
     if(selected) lv_obj_add_state(row,LV_STATE_CHECKED);
     lv_obj_add_event_cb(row,source_chosen,LV_EVENT_VALUE_CHANGED,NULL);
     return row;
+}
+
+/* Gateway pixels are already cropped and darkened; retain the selected palette. */
+void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled) {
+    ui->backdrop_enabled=enabled;
+    bool visible=enabled && ui->backdrop_loaded;
+    lv_obj_set_style_bg_img_src(ui->root,visible ? &ui->backdrop_descriptor : NULL,0);
+    lv_style_set_bg_opa(&backgrounds[BG],visible ? LV_OPA_40 : LV_OPA_COVER);
+    lv_obj_report_style_change(&backgrounds[BG]);
+    if(ui->backdrop_button) lv_label_set_text(lv_obj_get_child(ui->backdrop_button,0),enabled ? "Backdrop: gateway" : "Backdrop: off");
+}
+bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length) {
+    if(!packet) {
+        lv_obj_set_style_bg_img_src(ui->root,NULL,0);
+        lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
+#ifdef ESP_PLATFORM
+        free(ui->backdrop_pixels);
+#else
+        lv_mem_free(ui->backdrop_pixels);
+#endif
+        ui->backdrop_pixels=NULL; ui->backdrop_loaded=false;
+        controller_ui_enable_backdrop(ui,ui->backdrop_enabled); return true;
+    }
+    if(length!=8+UI_WIDTH*UI_HEIGHT*2 || memcmp(packet,"MCBG\xe0\x01\x20\x03",8)) return false;
+    if(!ui->backdrop_pixels) ui->backdrop_pixels=art_allocate(UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t));
+    if(!ui->backdrop_pixels) return false;
+    for(unsigned i=0;i<UI_WIDTH*UI_HEIGHT;i++) {
+        unsigned v=packet[8+i*2] | ((unsigned)packet[9+i*2]<<8);
+        ui->backdrop_pixels[i]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);
+    }
+    ui->backdrop_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=UI_WIDTH,.h=UI_HEIGHT},
+        .data_size=UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t),.data=(const uint8_t *)ui->backdrop_pixels};
+    lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
+    ui->backdrop_loaded=true; controller_ui_enable_backdrop(ui,ui->backdrop_enabled);
+    lv_obj_invalidate(ui->root); return true;
 }

@@ -1,4 +1,10 @@
-# Household controller — live playback, queue and catalogue
+# Historical Atlas integration notes
+
+These notes describe the earlier Atlas deployment and acceptance work, not the
+current installation procedure. For a new deployment use [gateway setup](../gateway/README.md),
+[browser guide](prototype.md) and [firmware guide](../firmware/esp32/README.md).
+The gateway is now also present in this repository; the Atlas implementation
+remains unchanged.
 
 ## Tested integration baseline (Atlas, October 2026)
 
@@ -17,7 +23,7 @@ Allowing the existing Docker subnet to reach that port resolved connectivity.
 Port 8097 remains separately required for Sonos/Cast to fetch audio streams.
 These are Atlas deployment concerns, not settings for this public repository.
 
-## This iteration (requires live validation)
+## Original iteration (required live validation)
 
 - Transport: play, pause, explicit stop, next, previous and volume for the
   selected player. Buttons disable during requests and errors are surfaced.
@@ -45,7 +51,7 @@ the controller intentionally has no household login, anyone on the permitted
 LAN can control playback. Keep the gateway private, do not expose its container
 port or the MA server directly to WAN, and never commit secrets.
 
-## Release and deployment
+## Original Atlas release and deployment
 
 1. Merge the controller and companion Atlas gateway PR after CI passes.
 2. Publish a **new** semver tag/release with the verified static artifacts.
@@ -56,7 +62,8 @@ port or the MA server directly to WAN, and never commit secrets.
 6. Confirm Navidrome public root is unaffected and protected controller routes
    remain inaccessible from mobile data.
 
-## Further work
+## Follow-ups identified at the time
 
 Search across providers, artist-to-album drill-down, favourites, device
-capability-specific controls, and native ESP32 LVGL port are later milestones.
+capability-specific controls were identified as follow-ups. A native ESP32
+LVGL implementation now exists; consult its README for current scope.
