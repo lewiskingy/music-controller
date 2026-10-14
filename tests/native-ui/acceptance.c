@@ -445,13 +445,12 @@ int main(int argc,char **argv) {
     before=intent_count; click(ui.volume_up); CHECK(intent_count==before+1 && last_intent.type==UI_VOLUME_UP);
     click(ui.settings_button); geometry();
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    unsigned char *backdrop=calloc(1,8+480*800*2);
+    unsigned char *backdrop=malloc(8+480*800*2);
     CHECK(backdrop!=NULL);
-    memcpy(backdrop,"MCBG\xe0\x01\x20\x03",8);
-    for(unsigned y=0;y<800;y++) for(unsigned x=0;x<480;x++) {
-        unsigned v=((x/16)%2 ? 0x780f : 0xc300) + (y/32)%16;
-        backdrop[8+(y*480+x)*2]=v&255; backdrop[9+(y*480+x)*2]=v>>8;
-    }
+    char backdrop_path[1024]; snprintf(backdrop_path,sizeof(backdrop_path),"%s/test-theme.mcbg",argv[2]);
+    FILE *backdrop_file=fopen(backdrop_path,"rb"); CHECK(backdrop_file!=NULL);
+    CHECK(fread(backdrop,1,8+480*800*2,backdrop_file)==8+480*800*2);
+    CHECK(fgetc(backdrop_file)==EOF); fclose(backdrop_file);
     CHECK(!controller_ui_set_backdrop(&ui,backdrop,12));
     CHECK(controller_ui_set_backdrop(&ui,backdrop,8+480*800*2));
     CHECK(ui.backdrop_loaded && !ui.backdrop_enabled);

@@ -57,6 +57,7 @@ jobs:
           cmake --build build/native-ui -j2
       - name: Exercise layout and interactions; capture framebuffers
         run: |
+          python -m pip install -r gateway/requirements.txt
           mkdir -p artifacts/native-ui
           set -o pipefail
           python tests/native-ui/mock_artwork.py build/mock-artwork
