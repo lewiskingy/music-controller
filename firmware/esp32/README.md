@@ -398,7 +398,9 @@ Local execution with an LVGL v8.3.11 checkout:
 cmake -S tests/native-ui -B build/native-ui -DLVGL_SOURCE_DIR=/absolute/path/to/lvgl
 cmake --build build/native-ui -j2
 mkdir -p artifacts/native-ui
-build/native-ui/ui_acceptance artifacts/native-ui
+python -m pip install -r gateway/requirements.txt
+python tests/native-ui/mock_artwork.py build/mock-artwork
+build/native-ui/ui_acceptance artifacts/native-ui build/mock-artwork
 python tests/native-ui/convert_screenshots.py artifacts/native-ui
 ```
 
@@ -417,6 +419,14 @@ The companion Atlas gateway advertises `artwork_rgb565` and annotates current qu
 The gateway supplies a generic record cover for absent or failed provider art. An unreachable/older gateway leaves the local placeholder visible, without affecting playback controls. Companion changes are in Atlas PR #614.
 
 Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks both artwork slots, malformed/truncated packets, stale responses and artwork changes; functional screenshots include real-cover fixtures and generic covers.
+
+The single backdrop fixture is `tests/native-ui/fixtures/halloween-480x800.png`
+(exactly 480 × 800). It replaces the synthetic striped background in
+`backdrop-playing`, `backdrop-settings` and `backdrop-light-settings` captures.
+The fixture generator uses the production gateway's normalization, default 35%
+brightness and RGB565 packet encoding. Other captures keep their ordinary colour
+theme. The PNG can also be uploaded at `/backdrop` for manual testing; it is not
+installed or enabled automatically on deployed controllers.
 
 ### Queue
 
