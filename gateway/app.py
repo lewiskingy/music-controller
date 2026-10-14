@@ -6,6 +6,7 @@ import os
 import hmac
 import time
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
+from backdrop import BackdropStore, MAX_UPLOAD
 from artwork import ArtworkService
 from browse import BrowseRequest, SearchRequest, validate_browse, validate_search
 
@@ -216,7 +217,16 @@ async def health(_):
 
 
 def create_app():
-    app = web.Application(client_max_size=MAX_MESSAGE)
+    app = web.Application(client_max_size=MAX_UPLOAD)
+    backdrop = BackdropStore(os.environ.get("CONTROLLER_BACKDROP_STATE", "/data/backdrop.json"))
+    source = os.environ.get("CONTROLLER_BACKDROP_FILE", "")
+    if source and not backdrop.path.exists():
+        from pathlib import Path
+        data = Path(source).read_bytes()
+        if len(data) > MAX_UPLOAD:
+            raise ValueError("Backdrop file exceeds 8 MiB")
+        backdrop.save({**backdrop.state, "enabled": True, "image": backdrop.normalize(data)})
+    backdrop.routes(app)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_get("/device/ws", websocket_handler)
     app.router.add_get("/health", health)

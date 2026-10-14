@@ -5,6 +5,14 @@
         rewrite * /device/ws
         reverse_proxy gateway:8080
     }
+    handle /controller/device/backdrop {
+        uri strip_prefix /controller
+        reverse_proxy gateway:8080
+    }
+    handle /controller/backdrop* {
+        uri strip_prefix /controller
+        reverse_proxy gateway:8080
+    }
     handle /controller/device/artwork/* {
         uri strip_prefix /controller
         reverse_proxy gateway:8080

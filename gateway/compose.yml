@@ -8,6 +8,8 @@ services:
       MA_PASSWORD: ${MA_PASSWORD:?Set MA_PASSWORD in .env}
       CONTROLLER_DEVICE_TOKEN: ${CONTROLLER_DEVICE_TOKEN:?Set CONTROLLER_DEVICE_TOKEN in .env}
       CONTROLLER_ORIGIN: ${CONTROLLER_ORIGIN:-}
+    volumes:
+      - gateway_data:/data
     extra_hosts:
       - host.docker.internal:host-gateway
     ports:
@@ -38,5 +40,6 @@ services:
       gateway:
         condition: service_healthy
 volumes:
+  gateway_data:
   caddy_data:
   caddy_config:
