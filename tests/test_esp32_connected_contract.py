@@ -1,6 +1,6 @@
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 FW = ROOT / "firmware/esp32"
 MAIN = (FW / "main/main.c").read_text()
 PROVISION = (FW / "provision.py").read_text()
