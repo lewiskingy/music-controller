@@ -6,6 +6,7 @@ import os
 import hmac
 import time
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
+from settings import DeviceSettings
 from backdrop import BackdropStore, MAX_UPLOAD
 from artwork import ArtworkService
 from browse import BrowseRequest, SearchRequest, validate_browse, validate_search
@@ -114,6 +115,7 @@ async def websocket_handler(request):
             raise web.HTTPForbidden(text="Invalid device credential")
     elif not CONTROLLER_ORIGIN or request.headers.get("Origin", "") != CONTROLLER_ORIGIN:
         raise web.HTTPForbidden(text="Invalid controller origin")
+    settings = request.app.get("device_settings")
     browser = web.WebSocketResponse(max_msg_size=MAX_MESSAGE, heartbeat=30)
     await browser.prepare(request)
     try:
@@ -134,6 +136,9 @@ async def websocket_handler(request):
                             data = json.loads(msg.data)
                             if not isinstance(data, dict):
                                 raise ValueError("Expected request object")
+                            if settings is not None and request.path == "/device/ws" and data.get("event") == "controller/settings/state":
+                                await settings.receive(browser, data.get("data"))
+                                continue
                             name = data.get("command")
                             message_id = data.get("message_id")
                             if not isinstance(message_id, (str, int)):
@@ -195,6 +200,8 @@ async def websocket_handler(request):
         if not browser.closed:
             await browser.send_json({"event": "gateway/error", "data": {"message": "Music Assistant connection failed"}})
     finally:
+        if settings is not None:
+            settings.disconnect(browser)
         await browser.close()
     return browser
 
@@ -227,6 +234,8 @@ def create_app():
             raise ValueError("Backdrop file exceeds 8 MiB")
         backdrop.save({**backdrop.state, "enabled": True, "image": backdrop.normalize(data)})
     backdrop.routes(app)
+    app["device_settings"] = DeviceSettings(CONTROLLER_ORIGIN)
+    app["device_settings"].routes(app)
     app.router.add_get("/ws", websocket_handler)
     app.router.add_get("/device/ws", websocket_handler)
     app.router.add_get("/health", health)

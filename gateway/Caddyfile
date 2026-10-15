@@ -9,6 +9,10 @@
         uri strip_prefix /controller
         reverse_proxy gateway:8080
     }
+    handle /controller/settings* {
+        uri strip_prefix /controller
+        reverse_proxy gateway:8080
+    }
     handle /controller/backdrop* {
         uri strip_prefix /controller
         reverse_proxy gateway:8080
