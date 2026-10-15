@@ -537,3 +537,12 @@ fixture, checks greyscale selection, exclusive choice, malformed packets, and
 independent selected/source badges. Real-device acceptance must confirm header
 player-name fit, touch targets, provider discovery on the installed MA version,
 upload refresh, source correctness and PSRAM availability.
+
+Provider selection uses dedicated `SELECTION` / `ON_SELECTION` colour roles,
+separate from ordinary cards and subtle pressed/active surfaces. The entire
+selected row gets the palette's stronger selection fill with white text; the
+Grey palette uses blue in both light and dark modes. Unselected rows retain
+muted text and grey icons. Shared styles update existing rows on theme changes.
+Native acceptance checks distinct selected/unselected fills and at least 4.5:1
+selected-caption contrast across all twelve palette/mode combinations, with
+representative Green and Grey screenshots in both modes.
