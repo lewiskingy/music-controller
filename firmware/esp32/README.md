@@ -512,3 +512,28 @@ preferences. Deploy the updated gateway and route `/controller/settings*` to its
 the optional state report; local timeout settings still work. Full-flash images
 can overwrite NVS: restore your private image afterwards, or use application-only
 updates at the documented application offset to retain preferences.
+
+### Provider icons
+
+The top-right icon beside the player identifies the selected browsing/search
+provider and opens Providers when tapped. Provider rows use the same icon:
+selected is full colour, other providers are grey with muted names. They remain
+tappable and exactly one is selected; Save persists the choice as before. The
+album-art badge identifies the current stream source, which can differ from the
+selected browsing provider. Unknown or ambiguous stream sources have no badge.
+
+The gateway discovers MA logos and serves transparent 40×40 MCPI packets through
+the existing token-authenticated artwork route. A separate worker refreshes
+registered icons around every 30 seconds without UI locks during networking.
+The UI retains at most 24 icon buffers in PSRAM (roughly 113 KiB at 16-bit colour).
+Downloads never write NVS. Upload per-instance logo overrides at
+`/controller/settings/providers` when MA has no suitable logo, including an
+OpenSubsonic instance that is specifically Navidrome. Local UI falls back to a
+music symbol before icons load or with an older gateway; other controls and
+power-saving timers continue to work. Logo refresh does not count as activity.
+
+Native acceptance uses upstream Spotify/BBC Sounds logos plus a Navidrome override
+fixture, checks greyscale selection, exclusive choice, malformed packets, and
+independent selected/source badges. Real-device acceptance must confirm header
+player-name fit, touch targets, provider discovery on the installed MA version,
+upload refresh, source correctness and PSRAM availability.

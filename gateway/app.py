@@ -6,6 +6,7 @@ import os
 import hmac
 import time
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
+from provider_icons import ProviderIcons
 from settings import DeviceSettings
 from backdrop import BackdropStore, MAX_UPLOAD
 from artwork import ArtworkService
@@ -19,7 +20,7 @@ PASSWORD = os.environ.get("MA_PASSWORD", "")
 CONTROLLER_ORIGIN = os.environ.get("CONTROLLER_ORIGIN", "")
 DEVICE_TOKEN = os.environ.get("CONTROLLER_DEVICE_TOKEN", "")
 # Exact supported MA commands. Never permit auth/config/admin or arbitrary methods.
-DEVICE_CAPABILITIES = {"seek": True, "artwork_rgb565": True, "queue_item_play": True, "browse": True, "search": True}
+DEVICE_CAPABILITIES = {"provider_icons": True, "seek": True, "artwork_rgb565": True, "queue_item_play": True, "browse": True, "search": True}
 ARTWORK = ArtworkService(MA_URL)
 ARG_RULES = {
     "players/all": {},
@@ -116,6 +117,7 @@ async def websocket_handler(request):
     elif not CONTROLLER_ORIGIN or request.headers.get("Origin", "") != CONTROLLER_ORIGIN:
         raise web.HTTPForbidden(text="Invalid controller origin")
     settings = request.app.get("device_settings")
+    icons = request.app.get("provider_icons")
     browser = web.WebSocketResponse(max_msg_size=MAX_MESSAGE, heartbeat=30)
     await browser.prepare(request)
     try:
@@ -126,6 +128,9 @@ async def websocket_handler(request):
                 await browser.send_json({"event": "gateway/capabilities", "data": DEVICE_CAPABILITIES})
                 browse_requests={}
                 browse_sequence=0
+                provider_requests=set()
+                icon_requests={}
+                requested_icons=set()
                 async def to_upstream():
                     nonlocal browse_sequence
                     async for msg in browser:
@@ -144,6 +149,9 @@ async def websocket_handler(request):
                             if not isinstance(message_id, (str, int)):
                                 raise ValueError("Invalid message ID")
                             args = validate_command(name, data.get("args", {}))
+                            if name=="providers":
+                                if len(provider_requests)>=32: provider_requests.pop()
+                                provider_requests.add(str(message_id))
                             if name in {"controller/browse", "controller/search"}:
                                 for key in list(browse_requests):
                                     if time.monotonic()-browse_requests[key].created>15: browse_requests.pop(key)
@@ -167,6 +175,31 @@ async def websocket_handler(request):
                             except ValueError:
                                 continue
                             upstream_id=str(data.get("message_id", ""))
+                            if icons is not None and upstream_id in icon_requests:
+                                domain=icon_requests.pop(upstream_id)
+                                if not data.get("error") and not data.get("error_code"):
+                                    await icons.receive(domain,data.get("result"))
+                                continue
+                            if icons is not None and upstream_id=="__gateway_provider_manifests":
+                                manifests=data.get("result")
+                                if isinstance(manifests,dict): manifests=list(manifests.values())
+                                if isinstance(manifests,list):
+                                    for manifest in manifests[:128]:
+                                        if isinstance(manifest,dict) and manifest.get("domain") in requested_icons:
+                                            await icons.receive(manifest["domain"],manifest.get("icon_svg"))
+                                continue
+                            if icons is not None and upstream_id in provider_requests:
+                                if not data.get("partial"): provider_requests.discard(upstream_id)
+                                providers=data.get("result")
+                                if isinstance(providers,list):
+                                    domains=icons.register(providers)-requested_icons
+                                    for domain in sorted(domains):
+                                        internal_id="__gateway_provider_icon_"+domain
+                                        icon_requests[internal_id]=domain
+                                        await upstream.send_json({"message_id":internal_id,"command":"providers/icon","args":{"provider":domain,"variant":"default"}})
+                                    if domains and not requested_icons:
+                                        await upstream.send_json({"message_id":"__gateway_provider_manifests","command":"providers/manifests","args":{}})
+                                    requested_icons.update(domains)
                             if upstream_id in browse_requests:
                                 browse=browse_requests[upstream_id]
                                 if data.get("error") or data.get("error_code"):
@@ -186,7 +219,7 @@ async def websocket_handler(request):
                             if str(data.get("message_id", "")).startswith("__gateway_"):
                                 continue
                             if data.get("event") or data.get("message_id") is not None:
-                                await browser.send_json(ARTWORK.annotate(data))
+                                await browser.send_json(ARTWORK.annotate(icons.annotate(data) if icons is not None else data))
                 tasks = [asyncio.create_task(to_upstream()), asyncio.create_task(to_browser())]
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in pending:
@@ -211,6 +244,14 @@ async def artwork_handler(request):
     if not DEVICE_TOKEN or not hmac.compare_digest(supplied, DEVICE_TOKEN):
         raise web.HTTPForbidden(text="Invalid device credential")
     key = request.match_info["art_id"]
+    if key.startswith("provider-"):
+        identity=key[len("provider-"):]
+        if len(identity)!=64 or any(c not in "0123456789abcdef" for c in identity):
+            raise web.HTTPBadRequest(text="Invalid provider identity")
+        icons=request.app["provider_icons"]
+        image,source=icons.image(identity)
+        return web.Response(body=image[0],content_type="application/octet-stream",
+                            headers={"Cache-Control":"no-store","X-Icon-Source":source})
     if key != "generic" and (len(key) != 64 or any(c not in "0123456789abcdef" for c in key)):
         raise web.HTTPBadRequest(text="Invalid artwork identity")
     packet, fallback = await ARTWORK.get(key)
@@ -234,6 +275,8 @@ def create_app():
             raise ValueError("Backdrop file exceeds 8 MiB")
         backdrop.save({**backdrop.state, "enabled": True, "image": backdrop.normalize(data)})
     backdrop.routes(app)
+    app["provider_icons"]=ProviderIcons(os.environ.get("CONTROLLER_PROVIDER_ICONS_STATE","/data/provider-icons.json"))
+    app["provider_icons"].routes(app)
     app["device_settings"] = DeviceSettings(CONTROLLER_ORIGIN)
     app["device_settings"].routes(app)
     app.router.add_get("/ws", websocket_handler)

@@ -35,3 +35,9 @@ for name in ("album","generic"):
                 if radius<6: r,g,b=24,27,31
             pixels.extend(struct.pack('<H',((r>>3)<<11)|((g>>2)<<5)|(b>>3)))
     (output/(name+'.mcar')).write_bytes(b'MCAR'+struct.pack('<HH',288,288)+pixels)
+
+# Provider fixtures are normalized by the production gateway, including transparency.
+from provider_icons import normalize
+for provider in ("spotify", "bbc_sounds", "navidrome"):
+    source=Path(__file__).resolve().parent / "fixtures" / ("provider-"+provider+(".png" if provider=="navidrome" else ".svg"))
+    (output/(provider+".mcpi")).write_bytes(normalize(source.read_bytes())[0])

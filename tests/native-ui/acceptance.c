@@ -142,15 +142,29 @@ int main(int argc,char **argv) {
         lv_obj_t *row=lv_list_add_btn(ui.players_list,NULL,players[i]);
         controller_ui_style_row(row,i==0,i!=3);
     }
+    const char *icon_names[]={"navidrome","spotify","bbc_sounds"};
+    char icon_ids[3][65];
+    for(unsigned i=0;i<3;i++) {
+        memset(icon_ids[i],'a'+i,64); icon_ids[i][64]=0;
+        char path[1024]; snprintf(path,sizeof(path),"%s/%s.mcpi",argv[2],icon_names[i]);
+        FILE *file=fopen(path,"rb"); CHECK(file!=NULL);
+        unsigned char packet[8+40*40*3]; CHECK(fread(packet,1,sizeof(packet),file)==sizeof(packet)); fclose(file);
+        CHECK(!controller_ui_set_provider_icon(&ui,icon_ids[i],packet,12));
+        CHECK(controller_ui_set_provider_icon(&ui,icon_ids[i],packet,sizeof(packet)));
+    }
     const char *sources[]={"Navidrome","Spotify","BBC Sounds"};
     for(unsigned i=0;i<3;i++) {
-        controller_ui_source_row(ui.providers_list,sources[i],i==0);
+        lv_obj_t *row=controller_ui_source_row(ui.providers_list,sources[i],i==0);
+        controller_ui_source_icon(row,controller_ui_provider_icon(&ui,icon_ids[i]));
     }
     ui_playback_t state={.track="Daydreamer",.artist="Adele",.album="19",.player="Extension",
         .status="Connected",.player_id="room-a",.queue_id="queue-a",.item_id="track-a",
         .volume=45,.position=42,.duration=220,.connected=true,.available=true,.playing=true,
         .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true,.can_search=true};
+    controller_ui_provider_badges(&ui,icon_ids[0],icon_ids[2]);
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
+    CHECK(!lv_obj_has_flag(ui.source_badge,LV_OBJ_FLAG_HIDDEN));
+    CHECK(lv_img_get_src(ui.selected_provider_image)!=lv_img_get_src(ui.source_image));
     click(ui.transport[0]); CHECK(intent_count==1 && last_intent.type==UI_PREVIOUS);
     click(ui.transport[1]); CHECK(intent_count==2 && last_intent.type==UI_PLAY_STOP);
     click(ui.transport[2]); CHECK(intent_count==3 && last_intent.type==UI_NEXT);
@@ -163,6 +177,8 @@ int main(int argc,char **argv) {
     screenshot("03-providers"); geometry();
     lv_obj_t *first_source=lv_obj_get_child(ui.providers_list,0), *second_source=lv_obj_get_child(ui.providers_list,1);
     click(second_source);
+    CHECK(lv_obj_get_style_img_recolor_opa(lv_obj_get_child(second_source,2),0)==LV_OPA_TRANSP);
+    CHECK(lv_obj_get_style_img_recolor_opa(lv_obj_get_child(first_source,2),0)==LV_OPA_COVER);
     CHECK(!lv_obj_has_state(first_source,LV_STATE_CHECKED) && lv_obj_has_state(second_source,LV_STATE_CHECKED));
     click(second_source); CHECK(lv_obj_has_state(second_source,LV_STATE_CHECKED));
     click(first_source);
@@ -488,6 +504,8 @@ int main(int argc,char **argv) {
     click(lv_obj_get_child(ui.power_panel,15));
     CHECK(lv_obj_has_flag(ui.power_panel,LV_OBJ_FLAG_HIDDEN));
     printf("PASS: %u layout and interaction checks; %u screenshots at 480x800\n",checks,screenshots);
+    controller_ui_provider_badges(&ui,icon_ids[1],"");
+    CHECK(lv_obj_has_flag(ui.source_badge,LV_OBJ_FLAG_HIDDEN));
     free(album_packet); free(generic_packet);
     return 0;
 }

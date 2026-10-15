@@ -34,7 +34,7 @@ def test_existing_volume_and_transport_rules_preserved():
             GATEWAY.validate_command("players/cmd/volume_set", {"player_id": "extension", "volume_level": value})
 
 def test_gateway_advertises_seek_support():
-    assert GATEWAY.DEVICE_CAPABILITIES == {"seek": True, "artwork_rgb565": True, "queue_item_play": True, "browse": True, "search": True}
+    assert GATEWAY.DEVICE_CAPABILITIES == {"seek": True, "artwork_rgb565": True, "queue_item_play": True, "browse": True, "search": True, "provider_icons": True}
 
 @pytest.mark.parametrize("index", [0, 100000, "stable-queue-item-id"])
 def test_queue_item_play_accepts_index_or_stable_identity(index):

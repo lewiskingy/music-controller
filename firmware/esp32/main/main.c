@@ -50,7 +50,7 @@ typedef struct {
 } player_info_t;
 static player_info_t players[MAX_PLAYERS];
 static size_t player_count;
-typedef struct { char id[96]; char name[96]; bool selected; } music_provider_t;
+typedef struct { char id[96]; char name[96]; char icon_id[65]; bool selected; } music_provider_t;
 static music_provider_t music_providers[MAX_PROVIDERS];
 static size_t music_provider_count;
 static char selected_provider_ids[PROVIDER_SELECTION_SIZE];
@@ -76,6 +76,9 @@ static bool volume_deferred;
 static bool current_can_volume, gateway_can_queue, gateway_can_browse, gateway_can_search, gateway_can_seek, queue_active, queue_live, queue_allow_seek;
 static char current_queue_id[129], current_item_id[129], album[160];
 static char current_art_id[65];
+static char current_source_icon[65], provider_icon_result_id[65];
+static unsigned char *provider_icon_result;
+static bool gateway_can_provider_icons;
 static bool gateway_can_artwork;
 static bool backdrop_requested;
 static unsigned char *backdrop_result;
@@ -145,6 +148,7 @@ static int action_group(action_type_t type) {
 static void clear_timeline(void) {
     current_queue_id[0] = current_item_id[0] = album[0] = 0;
     current_art_id[0] = 0;
+    current_source_icon[0]=0;
     track_duration = 0; track_position = 0;
     queue_active = queue_live = queue_allow_seek = queue_playing = false;
 }
@@ -482,6 +486,7 @@ static void providers_received(const cJSON *array) {
         field(provider->id, sizeof(provider->id), item, "instance_id");
         if (!provider->id[0]) continue;
         field(provider->name, sizeof(provider->name), item, "name");
+        field(provider->icon_id,sizeof(provider->icon_id),item,"controller_icon_id");
         if (!provider->name[0]) memcpy(provider->name, provider->id, strlen(provider->id) + 1);
         provider->selected = false;
         music_provider_count++;
@@ -519,6 +524,7 @@ static void queues_received(const cJSON *array) {
         const cJSON *media = cJSON_GetObjectItemCaseSensitive(item, "media_item");
         if (!cJSON_IsObject(media)) media = item;
         field(current_item_id, sizeof(current_item_id), item, "queue_item_id");
+        field(current_source_icon,sizeof(current_source_icon),item,"controller_source_icon_id");
         if(active_view==VIEW_QUEUE && (strcmp(previous_item,current_item_id) || previous_total!=queue_total)) queue_requested=true;
         if (current_item_id[0] && gateway_can_artwork) {
             field(current_art_id,sizeof(current_art_id),item,"controller_art_id");
@@ -878,6 +884,7 @@ static void handle_message(const char *payload, size_t len) {
             gateway_can_search = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "search"));
             browse_dirty=true; search_dirty=true;
             gateway_can_queue = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "queue_item_play"));
+            gateway_can_provider_icons=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg,"data"),"provider_icons"));
             gateway_can_artwork = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "artwork_rgb565"));
             screen_dirty = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
@@ -1194,6 +1201,12 @@ static void update_now_playing(void) {
         .can_volume = current_can_volume, .can_seek = can_seek(), .live = queue_live, .can_queue=gateway_can_queue, .can_browse=gateway_can_browse, .can_search=gateway_can_search
     };
     controller_ui_update(&ui, &snapshot);
+    if(provider_icon_result) {
+        controller_ui_set_provider_icon(&ui,provider_icon_result_id,provider_icon_result,8+40*40*3);
+        free(provider_icon_result); provider_icon_result=NULL; providers_dirty=true;
+    }
+    const music_provider_t *source=selected_music_provider();
+    controller_ui_provider_badges(&ui,source ? source->icon_id : "",current_source_icon);
     if (art_result) {
         controller_ui_set_artwork(&ui,art_result_id,art_result,8+288*288*2);
         free(art_result); art_result=NULL;
@@ -1264,7 +1277,7 @@ static void provider_toggled(lv_event_t *event) {
     snprintf(action.player_id, sizeof(action.player_id), "%s", id);
     controller_ui_choose_source(providers_list,checkbox);
     action.selected = true;
-    ESP_LOGI(TAG, "Provider radio choice: selected=%d", (int)action.selected);
+    ESP_LOGI(TAG, "Provider choice: selected=%d", (int)action.selected);
     if (xQueueSend(action_queue, &action, 0) != pdTRUE)
         ESP_LOGW(TAG, "Provider selection queue full");
 }
@@ -1285,6 +1298,7 @@ static void build_providers_view(void) {
     }
     for (size_t i = 0; i < music_provider_count; ++i) {
         lv_obj_t *checkbox=controller_ui_source_row(providers_list,music_providers[i].name,music_providers[i].selected);
+        controller_ui_source_icon(checkbox,controller_ui_provider_icon(&ui,music_providers[i].icon_id));
         lv_obj_add_event_cb(checkbox, provider_toggled, LV_EVENT_VALUE_CHANGED, music_providers[i].id);
     }
 }
@@ -1355,6 +1369,62 @@ static void artwork_worker(void *unused) {
         }
         free(data);
         if(received!=BYTES) vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
+/* Logos are small but still fetched off the UI task. Periodic refresh picks up uploads. */
+static void provider_icon_worker(void *unused) {
+    (void)unused;
+    char fetched[17][65]={{0}};
+    int64_t fetched_at[17]={0};
+    unsigned cursor=0;
+    for(;;) {
+        vTaskDelay(pdMS_TO_TICKS(300));
+        char id[65]=""; unsigned slot;
+        if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) continue;
+        slot=cursor++%(music_provider_count+1);
+        bool fetch=ready && gateway_can_provider_icons && !provider_icon_result;
+        snprintf(id,sizeof(id),"%s",slot<music_provider_count ? music_providers[slot].icon_id : current_source_icon);
+        if(!id[0] || (strlen(id)!=64 || strspn(id,"0123456789abcdef")!=64) ||
+           (!strcmp(fetched[slot],id) && esp_timer_get_time()-fetched_at[slot]<30000000LL)) fetch=false;
+        xSemaphoreGive(state_mutex);
+        if(!fetch) continue;
+        char endpoint[360];
+        if(strncmp(url,"wss://",6)) continue;
+        snprintf(endpoint,sizeof(endpoint),"https://%s",url+6);
+        char *suffix=strrchr(endpoint,'/');
+        if(!suffix || strcmp(suffix,"/ws")) continue;
+        snprintf(suffix,sizeof(endpoint)-(suffix-endpoint),"/artwork/provider-%s",id);
+        enum { BYTES=8+40*40*3 };
+        unsigned char *packet=malloc(BYTES);
+        if(!packet) continue;
+        esp_http_client_config_t config={.url=endpoint,.timeout_ms=5000,
+            .crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true};
+        esp_http_client_handle_t client=esp_http_client_init(&config);
+        int received=0;
+        if(client) {
+            esp_http_client_set_header(client,"X-Device-Token",token);
+            if(esp_http_client_open(client,0)==ESP_OK && esp_http_client_fetch_headers(client)==BYTES && esp_http_client_get_status_code(client)==200) {
+                while(received<BYTES) {
+                    int count=esp_http_client_read(client,(char *)packet+received,BYTES-received);
+                    if(count<=0) break;
+                    received+=count;
+                }
+            }
+            esp_http_client_close(client); esp_http_client_cleanup(client);
+        }
+        /* Back off failures as well; old valid pixels remain during outages. */
+        snprintf(fetched[slot],sizeof(fetched[slot]),"%s",id); fetched_at[slot]=esp_timer_get_time();
+        if(received==BYTES && !memcmp(packet,"MCPI\x28\x00\x28\x00",8) &&
+           xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
+            if(!provider_icon_result) {
+                provider_icon_result=packet; packet=NULL;
+                snprintf(provider_icon_result_id,sizeof(provider_icon_result_id),"%s",id);
+                screen_dirty=true;
+            }
+            xSemaphoreGive(state_mutex);
+        }
+        free(packet);
     }
 }
 
@@ -1498,6 +1568,7 @@ void app_main(void) {
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
     ESP_ERROR_CHECK(xTaskCreate(backdrop_worker,"backdrop",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(xTaskCreate(provider_icon_worker,"provider-icons",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(xTaskCreate(artwork_worker,"artwork",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());

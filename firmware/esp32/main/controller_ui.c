@@ -56,9 +56,15 @@ void controller_ui_set_theme(controller_ui_t *ui, unsigned palette, bool light) 
     }
 }
 void controller_ui_style_source(lv_obj_t *obj) {
-    lv_obj_set_style_radius(obj,LV_RADIUS_CIRCLE,LV_PART_INDICATOR);
-    fg(obj,TEXT,0); bg(obj,CARD,LV_PART_INDICATOR);
-    bg(obj,ACCENT,LV_PART_INDICATOR | LV_STATE_CHECKED);
+    bool selected=lv_obj_has_state(obj,LV_STATE_CHECKED);
+    bg(obj,selected?ACTIVE:CARD,0);
+    if(lv_obj_get_child_cnt(obj)>0) fg(lv_obj_get_child(obj,0),selected?TEXT:MUTED,0);
+    if(lv_obj_get_child_cnt(obj)>2) {
+        lv_obj_t *image=lv_obj_get_child(obj,2);
+        lv_obj_set_style_img_recolor(image,lv_color_hex(0x889099),0);
+        lv_obj_set_style_img_recolor_opa(image,selected?LV_OPA_TRANSP:LV_OPA_COVER,0);
+        lv_obj_set_style_opa(image,selected?LV_OPA_COVER:LV_OPA_50,0);
+    }
 }
 static void settings_clicked(lv_event_t *event) {
     controller_ui_t *ui = lv_event_get_user_data(event);
@@ -342,10 +348,16 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_t *header = panel(root, 0, 0, UI_WIDTH, UI_HEADER_HEIGHT, BG);
     ui->heading = label(header, "Now Playing", 68, 22, 142, TEXT, false);
     ui->settings_button = button(header, LV_SYMBOL_SETTINGS, 8, 8, 48, 48, settings_clicked, ui);
-    ui->player_button = button(header, "", 224, 8, 248, 48, players_cb, NULL);
+    ui->player_button = button(header, "", 224, 8, 196, 48, players_cb, NULL);
     lv_obj_t *player_button = ui->player_button;
     ui->player_text = lv_obj_get_child(player_button, 0);
-    lv_obj_set_width(ui->player_text, 210);
+    lv_obj_set_width(ui->player_text, 164);
+    ui->selected_provider_button=button(header,"",424,8,48,48,providers_cb,NULL);
+    ui->selected_provider_fallback=lv_obj_get_child(ui->selected_provider_button,0);
+    lv_label_set_text(ui->selected_provider_fallback,LV_SYMBOL_AUDIO);
+    ui->selected_provider_image=lv_img_create(ui->selected_provider_button);
+    lv_obj_center(ui->selected_provider_image);
+    lv_obj_add_flag(ui->selected_provider_image,LV_OBJ_FLAG_HIDDEN);
     lv_label_set_long_mode(ui->player_text, LV_LABEL_LONG_DOT);
     ui->now_content = panel(root, 0, UI_HEADER_HEIGHT, UI_CONTENT_WIDTH, UI_CONTENT_HEIGHT, BG);
     ui->players_content = panel(root, 0, UI_HEADER_HEIGHT, UI_CONTENT_WIDTH, UI_CONTENT_HEIGHT, BG);
@@ -361,6 +373,11 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->art_image = lv_img_create(art);
     lv_obj_set_pos(ui->art_image,0,0);
     lv_obj_add_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
+    ui->source_badge=panel(art,232,232,48,48,CARD);
+    lv_obj_set_style_radius(ui->source_badge,10,0);
+    ui->source_image=lv_img_create(ui->source_badge);
+    lv_obj_set_pos(ui->source_image,4,4);
+    lv_obj_add_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
     ui->title = label(ui->now_content, "Nothing playing", 24, 326, 352, TEXT, true);
     lv_obj_set_height(ui->title, 58);
     lv_obj_set_style_text_align(ui->title, LV_TEXT_ALIGN_CENTER, 0);
@@ -741,19 +758,80 @@ void controller_ui_choose_source(lv_obj_t *list,lv_obj_t *chosen) {
         lv_obj_t *row=lv_obj_get_child(list,i);
         if(row==chosen) lv_obj_add_state(row,LV_STATE_CHECKED);
         else lv_obj_clear_state(row,LV_STATE_CHECKED);
+        controller_ui_style_source(row);
     }
 }
 
 static void source_chosen(lv_event_t *event) {
     lv_obj_t *row=lv_event_get_target(event);
     controller_ui_choose_source(lv_obj_get_parent(row),row);
+    lv_event_send(row,LV_EVENT_VALUE_CHANGED,NULL);
 }
 lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected) {
-    lv_obj_t *row=lv_checkbox_create(list);
-    controller_ui_style_source(row); lv_checkbox_set_text(row,name); lv_obj_set_size(row,352,72);
+    lv_obj_t *row=button(list,name,0,0,352,72,source_chosen,NULL);
+    lv_obj_t *caption=lv_obj_get_child(row,0);
+    lv_obj_set_align(caption,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(caption,64,24); lv_obj_set_width(caption,264);
+    lv_label_set_long_mode(caption,LV_LABEL_LONG_DOT);
+    label(row,LV_SYMBOL_AUDIO,16,24,40,MUTED,false);
+    lv_obj_t *image=lv_img_create(row); lv_obj_set_pos(image,12,16);
+    lv_obj_add_flag(image,LV_OBJ_FLAG_HIDDEN);
     if(selected) lv_obj_add_state(row,LV_STATE_CHECKED);
-    lv_obj_add_event_cb(row,source_chosen,LV_EVENT_VALUE_CHANGED,NULL);
+    bg(row,ACTIVE,LV_STATE_CHECKED);
+    controller_ui_style_source(row);
     return row;
+}
+void controller_ui_source_icon(lv_obj_t *row,const lv_img_dsc_t *image) {
+    lv_obj_t *icon=lv_obj_get_child(row,2),*fallback=lv_obj_get_child(row,1);
+    if(image) {
+        lv_img_set_src(icon,image); lv_obj_clear_flag(icon,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(fallback,LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(icon,LV_OBJ_FLAG_HIDDEN); lv_obj_clear_flag(fallback,LV_OBJ_FLAG_HIDDEN);
+    }
+    controller_ui_style_source(row);
+}
+const lv_img_dsc_t *controller_ui_provider_icon(controller_ui_t *ui,const char *id) {
+    if(!id || !id[0]) return NULL;
+    for(unsigned i=0;i<UI_PROVIDER_ICONS;i++)
+        if(!strcmp(ui->provider_icons[i].id,id)) return &ui->provider_icons[i].image;
+    return NULL;
+}
+bool controller_ui_set_provider_icon(controller_ui_t *ui,const char *id,const unsigned char *packet,size_t length) {
+    if(!id || strlen(id)!=64 || strspn(id,"0123456789abcdef")!=64 ||
+       !packet || length!=8+40*40*3 || memcmp(packet,"MCPI\x28\x00\x28\x00",8)) return false;
+    ui_provider_icon_t *icon=NULL;
+    for(unsigned i=0;i<UI_PROVIDER_ICONS;i++) if(!strcmp(ui->provider_icons[i].id,id)) { icon=&ui->provider_icons[i]; break; }
+    if(!icon) icon=&ui->provider_icons[ui->provider_icon_next++%UI_PROVIDER_ICONS];
+    if(!icon->pixels) icon->pixels=art_allocate(40*40*LV_IMG_PX_SIZE_ALPHA_BYTE);
+    if(!icon->pixels) return false;
+    lv_img_cache_invalidate_src(&icon->image);
+    for(unsigned i=0;i<40*40;i++) {
+        unsigned value=packet[8+i*3]|((unsigned)packet[9+i*3]<<8);
+        lv_color_t color=lv_color_make(((value>>11)&31)*255/31,((value>>5)&63)*255/63,(value&31)*255/31);
+        memcpy(icon->pixels+i*LV_IMG_PX_SIZE_ALPHA_BYTE,&color,sizeof(color));
+        icon->pixels[i*LV_IMG_PX_SIZE_ALPHA_BYTE+sizeof(color)]=packet[10+i*3];
+    }
+    snprintf(icon->id,sizeof(icon->id),"%s",id);
+    icon->image=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR_ALPHA,.w=40,.h=40},
+        .data_size=40*40*LV_IMG_PX_SIZE_ALPHA_BYTE,.data=icon->pixels};
+    return true;
+}
+void controller_ui_provider_badges(controller_ui_t *ui,const char *selected,const char *source) {
+    const lv_img_dsc_t *icon=controller_ui_provider_icon(ui,selected);
+    if(icon) {
+        lv_img_set_src(ui->selected_provider_image,icon);
+        lv_obj_clear_flag(ui->selected_provider_image,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui->selected_provider_fallback,LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui->selected_provider_image,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui->selected_provider_fallback,LV_OBJ_FLAG_HIDDEN);
+    }
+    icon=controller_ui_provider_icon(ui,source);
+    if(icon) {
+        lv_img_set_src(ui->source_image,icon); lv_obj_clear_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(ui->source_badge);
+    } else lv_obj_add_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
 }
 
 /* Gateway pixels are already cropped and darkened; retain the selected palette. */

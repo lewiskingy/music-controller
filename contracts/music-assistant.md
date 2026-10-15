@@ -83,3 +83,31 @@ MA, expose arbitrary NVS keys, or replay settings after reconnect. Browser
 `GET /settings/api` returns connected snapshots; `PUT /settings/api/{device_id}`
 waits up to 12 seconds for the matching device/socket acknowledgement. Offline,
 busy, failed-save and unconfirmed-save responses are explicit.
+
+## Provider icons
+
+Gateway capability `provider_icons` enables optional native logos. Provider list
+entries gain `controller_icon_id` (opaque 64 lowercase hexadecimal characters,
+stable per provider instance). MA's provider domains stay distinct from instance
+IDs; overrides and selection use instance identities.
+
+Queue `current_item` gains `controller_source_icon_id` and
+`controller_source_name`. Prefer `streamdetails.provider` because the stream
+source can differ from the library item's provider. Without an explicit stream
+provider, a direct non-library media provider or one unambiguous mapping can be
+used. Ambiguous, removed or unknown providers yield empty values. The current
+browse selection is never a playback-source fallback.
+
+Authenticated GET `/device/artwork/provider-{id}` returns exactly **4808 bytes**:
+`MCPI`, little-endian uint16 width=40 and height=40, then 1600 interleaved pixels
+of little-endian RGB565 (2 bytes) and alpha (1 byte). `Cache-Control: no-store`
+permits periodic refresh of uploaded overrides. Unknown IDs receive a generic
+packet. Invalid IDs fail validation. Existing album-art MCAR packets/routes are
+unchanged; old firmware ignores the new capability and annotations.
+
+Gateway-only MA commands `providers/icon` and `providers/manifests` are not added
+to the arbitrary client-command allowlist. Logo responses are consumed locally;
+MA URLs and SVG are not passed to the device. Per-instance override management
+uses GET `/settings/providers/api`, PUT/DELETE `/settings/providers/api/{id}`,
+and GET `/settings/providers/api/{id}/preview`. Only normalized previews/packets
+are served; overrides persist on the gateway volume.
