@@ -1,4 +1,5 @@
 """Exercise the migrated gateway without a live Music Assistant or device."""
+import asyncio
 import json
 import sys
 import unittest
@@ -154,3 +155,30 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(gateway, 'PASSWORD', ''):
             response = await self.client.get('/health')
             self.assertEqual(response.status, 503)
+
+    async def test_device_settings_are_local_and_acknowledged(self):
+        ws = await self.client.ws_connect('/device/ws', headers={'X-Device-Token':'test-device-token'})
+        self.assertEqual((await ws.receive_json())['event'], 'gateway/ready')
+        await ws.receive_json()  # capabilities
+        state = dict(device_id='001122aabbcc', battery_seconds=30, usb_seconds=0,
+                     battery_default=30, usb_default=0, power_mode=0, power_source='unknown', saved=True)
+        await ws.send_json({'event':'controller/settings/state','data':state})
+        # An ordered MA request/reply confirms the state message was consumed first.
+        await ws.send_json({'message_id':'sync','command':'players/all','args':{}})
+        while (await ws.receive_json()).get('message_id') != 'sync':
+            pass
+        snapshot = await (await self.client.get('/settings/api')).json()
+        self.assertEqual(snapshot[state['device_id']]['battery_seconds'],30)
+        change = dict(battery_seconds=60,usb_seconds=0,power_mode=0)
+        pending = asyncio.create_task(self.client.put('/settings/api/'+state['device_id'],
+            json=change,headers={'Origin':'https://controller.example.net'}))
+        command = await ws.receive_json(timeout=2)
+        self.assertEqual(command['event'],'controller/settings/set')
+        self.assertFalse(pending.done())
+        await ws.send_json({'event':'controller/settings/state','data':{
+            **state,**change,'request_id':command['data']['request_id']}})
+        response = await pending
+        self.assertEqual(response.status,200)
+        self.assertEqual((await response.json())['battery_seconds'],60)
+        self.assertFalse(any(x.get('command','').startswith('controller/settings') for x in self.received))
+        await ws.close()

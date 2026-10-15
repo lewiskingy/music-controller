@@ -477,3 +477,38 @@ network interruptions and is cleared when disabled or removed. This uses roughly
 768 KiB for the retained pixels plus a temporary 768 KiB transfer buffer. Plain
 colour themes remain independent; opaque control cards and translucent palette
 backgrounds keep labels legible. The gateway prepares cropping and brightness.
+
+### Display power saving
+
+Settings → Screen power edits independent battery and USB/external timeouts in
+seconds (0–86400; **0 means always on**). Code defaults are **30 seconds on
+battery** and **0 on external power**. Optional provisioner values use NVS keys
+`controller/sleep_bat_def` and `sleep_usb_def` (u32). Saved user preferences
+`sleep_battery` and `sleep_usb` take precedence. Reset defaults removes both
+user overrides and restores Auto mode. `power_mode` (u8) stores Auto=0,
+Battery=1 or USB/external=2. Values survive reset/power loss; replacing the NVS
+partition restores the provisioned state and removes later user changes.
+
+**Automatic USB detection is not implemented. Auto treats the source as unknown
+and uses the battery timeout, even with USB connected.** Select USB/external
+manually to use its separate timeout. No onboard accelerometer is used. The
+published board circuit does not provide an established firmware-readable
+USB-present input; charging state and USB data enumeration are not substitutes.
+
+Touch/held touch renews the inactivity timer; metadata, progress, artwork and
+network events do not. On expiry only the backlight is switched off: touch,
+networking and playback state continue. The whole first touch gesture wakes the
+screen without operating a hidden control. This is backlight power saving,
+not deep sleep. Changes start a fresh timer; selecting an effective Always on timeout wakes
+an already dark screen. Hardware acceptance must verify backlight switching,
+first-touch suppression, offline operation and battery consumption on the board.
+
+The gateway's `/controller/settings` page can edit a connected device by its
+stable factory-MAC-derived ID. It waits for a correlated acknowledgement after
+NVS commit and reports failures/disconnection rather than claiming success.
+Device NVS remains authoritative; the gateway neither stores nor queues offline
+preferences. Deploy the updated gateway and route `/controller/settings*` to its
+`/settings*` paths, preserving the device WebSocket route. Older gateways ignore
+the optional state report; local timeout settings still work. Full-flash images
+can overwrite NVS: restore your private image afterwards, or use application-only
+updates at the documented application offset to retain preferences.

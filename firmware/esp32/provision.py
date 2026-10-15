@@ -28,6 +28,17 @@ if not ssid or not token or not gateway.startswith("wss://"):
 if len(ssid.encode()) > 32 or len(password.encode()) > 64 or len(token.encode()) > 128:
     sys.exit("One or more configuration values are too long.")
 
+def timeout(prompt):
+    value = input(prompt).strip()
+    if not value:
+        return None
+    if not value.isdecimal() or not 0 <= int(value) <= 86400:
+        sys.exit("Timeout must be 0–86400 seconds (0 = always on).")
+    return int(value)
+
+battery_timeout = timeout("Optional default battery timeout seconds [30]: ")
+usb_timeout = timeout("Optional default USB timeout seconds [0 = always on]: ")
+
 output = ROOT / "controller-nvs.bin"
 with tempfile.TemporaryDirectory() as temp:
     csv_path = Path(temp) / "config.csv"
@@ -42,6 +53,9 @@ with tempfile.TemporaryDirectory() as temp:
         ]:
             if value:
                 writer.writerow([key, "data", "string", value])
+        for key, value in [("sleep_bat_def", battery_timeout), ("sleep_usb_def", usb_timeout)]:
+            if value is not None:
+                writer.writerow([key, "data", "u32", value])
     subprocess.run([sys.executable, str(generator), "generate", str(csv_path), str(output), "0x6000"], check=True)
 print(f"Private image created: {output}")
 print("Flash only this NVS partition at 0x9000 AFTER flashing the full firmware image.")

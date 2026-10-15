@@ -16,6 +16,7 @@
 #include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_mac.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
@@ -29,6 +30,7 @@
 #include "lvgl.h"
 #include "controller_ui.h"
 #include "playback_policy.h"
+#include "power_policy.h"
 
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
@@ -754,13 +756,117 @@ static void search_received(const char *id,const cJSON *result,bool error) {
     }
     xSemaphoreGive(state_mutex);
 }
+/* Settings requests are serialized off the touch/WebSocket callbacks. */
+typedef struct { int battery, usb, mode; char request_id[65]; } power_change_t;
+static QueueHandle_t power_queue;
+static unsigned power_battery=30, power_usb=0, default_battery=30, default_usb=0;
+static unsigned power_mode;
+static char power_device_id[18];
+static volatile bool power_report_pending;
+static power_activity_t power_activity;
+static void (*power_original_read)(lv_indev_drv_t *, lv_indev_data_t *);
+static void power_read(lv_indev_drv_t *driver,lv_indev_data_t *data) {
+    power_original_read(driver,data);
+    bool pressed=data->state==LV_INDEV_STATE_PR;
+    if(power_touch(&power_activity,lv_tick_get(),pressed)) {
+        if(waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
+    }
+    if(power_suppress(&power_activity,pressed)) data->state=LV_INDEV_STATE_REL;
+}
+static void power_tick(lv_timer_t *timer) {
+    (void)timer;
+    /* No reliable USB-present input exists yet: Auto deliberately uses battery. */
+    unsigned seconds=power_timeout(power_battery,power_usb,power_mode);
+    if(power_expired(&power_activity,lv_tick_get(),seconds)) {
+        if(waveshare_rgb_lcd_bl_off()==ESP_OK) power_activity.asleep=true;
+    }
+}
+static void power_ui_change(int battery,int usb,int mode) {
+    power_change_t change={.battery=battery,.usb=usb,.mode=mode};
+    if(xQueueSend(power_queue,&change,0)==pdTRUE)
+        lv_label_set_text(ui.power_feedback,"Saving...");
+    else lv_label_set_text(ui.power_feedback,"Busy - retry Save");
+}
+static void power_load(void) {
+    nvs_handle_t n;
+    if(nvs_open("controller",NVS_READONLY,&n)==ESP_OK) {
+        uint32_t value;
+        if(nvs_get_u32(n,"sleep_bat_def",&value)==ESP_OK && value<=86400) default_battery=value;
+        if(nvs_get_u32(n,"sleep_usb_def",&value)==ESP_OK && value<=86400) default_usb=value;
+        power_battery=default_battery; power_usb=default_usb;
+        if(nvs_get_u32(n,"sleep_battery",&value)==ESP_OK && value<=86400) power_battery=value;
+        if(nvs_get_u32(n,"sleep_usb",&value)==ESP_OK && value<=86400) power_usb=value;
+        uint8_t mode=0;
+        if(nvs_get_u8(n,"power_mode",&mode)==ESP_OK && mode<=2) power_mode=mode;
+        nvs_close(n);
+    }
+    uint8_t mac[6];
+    ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
+    snprintf(power_device_id,sizeof(power_device_id),"%02x%02x%02x%02x%02x%02x",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+}
+static void power_report(const char *request_id,bool saved) {
+    if(!ws_connected) return;
+    char message[640];
+    snprintf(message,sizeof(message),"{\"event\":\"controller/settings/state\",\"data\":{\"device_id\":\"%s\",\"battery_seconds\":%u,\"usb_seconds\":%u,\"battery_default\":%u,\"usb_default\":%u,\"power_mode\":%u,\"power_source\":\"unknown\",\"request_id\":\"%s\",\"saved\":%s}}",power_device_id,power_battery,power_usb,default_battery,default_usb,power_mode,request_id,saved?"true":"false");
+    esp_websocket_client_send_text(socket_handle,message,strlen(message),pdMS_TO_TICKS(1000));
+}
+static void power_process(void) {
+    power_change_t change;
+    while(xQueueReceive(power_queue,&change,0)==pdTRUE) {
+        bool reset=change.battery==-1 && change.usb==-1;
+        nvs_handle_t n;
+        esp_err_t err=nvs_open("controller",NVS_READWRITE,&n);
+        if(err==ESP_OK) {
+            if(reset) {
+                err=nvs_erase_key(n,"sleep_battery"); if(err==ESP_ERR_NVS_NOT_FOUND) err=ESP_OK;
+                if(err==ESP_OK) { err=nvs_erase_key(n,"sleep_usb"); if(err==ESP_ERR_NVS_NOT_FOUND) err=ESP_OK; }
+            } else {
+                err=nvs_set_u32(n,"sleep_battery",change.battery);
+                if(err==ESP_OK) err=nvs_set_u32(n,"sleep_usb",change.usb);
+            }
+            if(err==ESP_OK) err=nvs_set_u8(n,"power_mode",change.mode);
+            if(err==ESP_OK) err=nvs_commit(n);
+            nvs_close(n);
+        }
+        if(lvgl_port_lock(0)) {
+            if(err==ESP_OK) {
+                power_battery=reset ? default_battery : (unsigned)change.battery;
+                power_usb=reset ? default_usb : (unsigned)change.usb;
+                power_mode=change.mode; power_activity.last_touch=lv_tick_get();
+                if(power_timeout(power_battery,power_usb,power_mode)==0 && power_activity.asleep && waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
+            }
+            controller_ui_power(&ui,power_battery,power_usb,power_mode,err==ESP_OK?"Saved locally":"Save failed - retry");
+            lvgl_port_unlock();
+        }
+        power_report(change.request_id,err==ESP_OK);
+    }
+    if(power_report_pending && ready) { power_report_pending=false; power_report("",true); }
+}
+static void power_receive(const cJSON *msg) {
+    const cJSON *data=cJSON_GetObjectItemCaseSensitive(msg,"data");
+    const cJSON *id=cJSON_GetObjectItemCaseSensitive(data,"request_id");
+    const cJSON *battery=cJSON_GetObjectItemCaseSensitive(data,"battery_seconds");
+    const cJSON *usb=cJSON_GetObjectItemCaseSensitive(data,"usb_seconds");
+    const cJSON *mode=cJSON_GetObjectItemCaseSensitive(data,"power_mode");
+    if(!cJSON_IsString(id) || strlen(id->valuestring)!=32 || strspn(id->valuestring,"0123456789abcdef")!=32) return;
+    if(!cJSON_IsNumber(battery) || !cJSON_IsNumber(usb) || !cJSON_IsNumber(mode)) return;
+    if(battery->valuedouble!=battery->valueint || usb->valuedouble!=usb->valueint || mode->valuedouble!=mode->valueint) return;
+    if(!((battery->valueint>=0 && battery->valueint<=86400 && usb->valueint>=0 && usb->valueint<=86400) || (battery->valueint==-1 && usb->valueint==-1)) || mode->valueint<0 || mode->valueint>2) return;
+    power_change_t change={.battery=battery->valueint,.usb=usb->valueint,.mode=mode->valueint};
+    snprintf(change.request_id,sizeof(change.request_id),"%s",id->valuestring);
+    xQueueSend(power_queue,&change,0);
+}
+
 static void handle_message(const char *payload, size_t len) {
     cJSON *msg = cJSON_ParseWithLength(payload, len);
     if (!msg) { ESP_LOGW(TAG, "Invalid JSON response (%u bytes)", (unsigned)len); return; }
     const cJSON *event = cJSON_GetObjectItemCaseSensitive(msg, "event");
     if (cJSON_IsString(event)) {
         ESP_LOGI(TAG, "Gateway event: %s", event->valuestring);
-        if (!strcmp(event->valuestring, "gateway/ready")) {
+        if (!strcmp(event->valuestring,"controller/settings/set")) {
+            power_receive(msg);
+        } else if (!strcmp(event->valuestring, "gateway/ready")) {
+            power_report_pending=true;
             const cJSON *caps = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "capabilities");
             gateway_can_seek = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(caps, "seek"));
             gateway_can_queue=false; gateway_can_browse=false; gateway_can_search=false;
@@ -1339,6 +1445,18 @@ static void init_screen(void) {
                          back_clicked, save_providers_clicked);
     ui.theme_cb = save_theme;
     ui.backdrop_cb = save_backdrop;
+    ui.power_cb=power_ui_change;
+    controller_ui_power(&ui,power_battery,power_usb,power_mode,"Auto uses battery; USB detection unavailable");
+    power_activity.last_touch=lv_tick_get();
+    lv_indev_t *input=NULL;
+    while((input=lv_indev_get_next(input))) {
+        if(input->driver->type==LV_INDEV_TYPE_POINTER) {
+            power_original_read=input->driver->read_cb;
+            input->driver->read_cb=power_read;
+            break;
+        }
+    }
+    lv_timer_create(power_tick,100,NULL);
     nvs_handle_t appearance;
     uint8_t palette = 0, light = 0, backdrop = 0;
     if (nvs_open("controller", NVS_READONLY, &appearance) == ESP_OK) {
@@ -1367,6 +1485,9 @@ void app_main(void) {
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
     esp_err_t err = nvs_flash_init();
+    power_queue=xQueueCreate(8,sizeof(power_change_t));
+    ESP_ERROR_CHECK(power_queue ? ESP_OK : ESP_ERR_NO_MEM);
+    power_load();
     ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
     if (lvgl_port_lock(2000)) {
         init_screen();
@@ -1409,6 +1530,7 @@ void app_main(void) {
     int64_t last_heartbeat = 0;
     int64_t last_position_render = 0;
     while (true) {
+        power_process();
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
                 status("Clock synced; connecting...");

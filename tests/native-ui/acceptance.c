@@ -11,6 +11,11 @@ static ui_intent_t last_intent;
 static unsigned intent_count;
 static const char *output_dir;
 static unsigned checks, screenshots, theme_saves;
+static int saved_battery, saved_usb, saved_power_mode;
+static unsigned power_saves;
+static void power_saved(int battery,int usb,int mode) {
+    saved_battery=battery; saved_usb=usb; saved_power_mode=mode; power_saves++;
+}
 static unsigned saved_palette;
 static bool saved_light;
 static void theme_saved(unsigned palette,bool light) { theme_saves++; saved_palette=palette; saved_light=light; }
@@ -466,6 +471,22 @@ int main(int argc,char **argv) {
     controller_ui_set_backdrop(&ui,NULL,0);
     CHECK(!ui.backdrop_loaded && ui.backdrop_pixels==NULL);
     free(backdrop);
+    ui.power_cb=power_saved;
+    controller_ui_power(&ui,30,0,0,"Auto uses battery; USB detection unavailable");
+    click(ui.power_button);
+    CHECK(!lv_obj_has_flag(ui.power_panel,LV_OBJ_FLAG_HIDDEN));
+    CHECK(lv_spinbox_get_value(ui.power_battery)==30);
+    CHECK(lv_spinbox_get_value(ui.power_usb)==0);
+    screenshot("screen-power-settings");
+    lv_spinbox_set_value(ui.power_battery,45);
+    lv_spinbox_set_value(ui.power_usb,300);
+    lv_dropdown_set_selected(ui.power_mode,2);
+    click(lv_obj_get_child(ui.power_panel,13));
+    CHECK(power_saves==1 && saved_battery==45 && saved_usb==300 && saved_power_mode==2);
+    click(lv_obj_get_child(ui.power_panel,14));
+    CHECK(power_saves==2 && saved_battery==-1 && saved_usb==-1 && saved_power_mode==0);
+    click(lv_obj_get_child(ui.power_panel,15));
+    CHECK(lv_obj_has_flag(ui.power_panel,LV_OBJ_FLAG_HIDDEN));
     printf("PASS: %u layout and interaction checks; %u screenshots at 480x800\n",checks,screenshots);
     free(album_packet); free(generic_packet);
     return 0;

@@ -299,6 +299,34 @@ void controller_ui_style_row(lv_obj_t *row, bool selected, bool available) {
     lv_obj_set_style_radius(row, 10, 0);
     if (!available) lv_obj_add_state(row, LV_STATE_DISABLED);
 }
+static void power_save(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    if(ui->power_cb) ui->power_cb(lv_spinbox_get_value(ui->power_battery),
+        lv_spinbox_get_value(ui->power_usb),lv_dropdown_get_selected(ui->power_mode));
+}
+static void power_reset(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    if(ui->power_cb) ui->power_cb(-1,-1,0);
+}
+static void power_close(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_add_flag(ui->power_panel,LV_OBJ_FLAG_HIDDEN);
+}
+static void power_open(lv_event_t *event) {
+    controller_ui_t *ui=lv_event_get_user_data(event);
+    lv_obj_clear_flag(ui->power_panel,LV_OBJ_FLAG_HIDDEN);
+}
+static void power_step(lv_event_t *event) {
+    lv_obj_t *spin=lv_event_get_user_data(event);
+    if(lv_obj_get_x(lv_event_get_target(event))<200) lv_spinbox_decrement(spin);
+    else lv_spinbox_increment(spin);
+}
+void controller_ui_power(controller_ui_t *ui,int battery,int usb,int mode,const char *message) {
+    lv_spinbox_set_value(ui->power_battery,battery);
+    lv_spinbox_set_value(ui->power_usb,usb);
+    lv_dropdown_set_selected(ui->power_mode,mode);
+    lv_label_set_text(ui->power_feedback,message);
+}
 void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t action_cb,
                           lv_event_cb_t players_cb, lv_event_cb_t providers_cb,
                           lv_event_cb_t back_cb, lv_event_cb_t save_cb) {
@@ -467,7 +495,32 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
         fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
     }
     ui->backdrop_button=button(ui->settings_content,"Backdrop: off",24,382,352,48,backdrop_clicked,ui);
-    ui->sources_button=button(ui->settings_content,"Music provider",24,446,352,56,providers_cb,NULL);
+    ui->sources_button=button(ui->settings_content,"Music provider",24,442,352,40,providers_cb,NULL);
+    ui->power_button=button(ui->settings_content,"Screen power",24,488,352,40,power_open,ui);
+    ui->power_panel=panel(root,0,0,UI_WIDTH,UI_HEIGHT,BG);
+    label(ui->power_panel,"Screen power",24,24,432,TEXT,true);
+    label(ui->power_panel,"Timeout seconds (0 = always on)",24,80,432,TEXT,false);
+    lv_obj_t **spins[]={&ui->power_battery,&ui->power_usb};
+    const char *names[]={"Battery","USB / external power"};
+    for(unsigned i=0;i<2;i++) {
+        int y=130+(int)i*130;
+        label(ui->power_panel,names[i],24,y,432,TEXT,true);
+        *spins[i]=lv_spinbox_create(ui->power_panel);
+        lv_obj_set_pos(*spins[i],130,y+40); lv_obj_set_size(*spins[i],180,52);
+        lv_spinbox_set_range(*spins[i],0,86400); lv_spinbox_set_digit_format(*spins[i],5,0);
+        lv_spinbox_set_step(*spins[i],1);
+        button(ui->power_panel,"-",24,y+40,80,52,power_step,*spins[i]);
+        button(ui->power_panel,"+",336,y+40,96,52,power_step,*spins[i]);
+    }
+    label(ui->power_panel,"Power mode",24,400,432,TEXT,true);
+    ui->power_mode=lv_dropdown_create(ui->power_panel);
+    lv_dropdown_set_options(ui->power_mode,"Auto (unknown: battery)\nBattery\nUSB / external");
+    lv_obj_set_pos(ui->power_mode,24,444); lv_obj_set_size(ui->power_mode,432,52);
+    ui->power_feedback=label(ui->power_panel,"",24,520,432,MUTED,false);
+    button(ui->power_panel,"Save",24,600,200,56,power_save,ui);
+    button(ui->power_panel,"Reset defaults",240,600,216,56,power_reset,ui);
+    button(ui->power_panel,"Back",24,690,432,56,power_close,ui);
+    lv_obj_add_flag(ui->power_panel,LV_OBJ_FLAG_HIDDEN);
     controller_ui_set_theme(ui,0,false);
     controller_ui_show(ui, UI_PLAYING);
 }

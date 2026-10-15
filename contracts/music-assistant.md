@@ -64,3 +64,22 @@ Queue `current_item` objects receive `controller_art_id`: an opaque SHA-256 desc
 The gateway fetches through MA's authenticated image proxy (`proxy_id` preferred, path/provider compatibility otherwise), with an eight-second timeout, no redirects, at most 2 MiB encoded bytes and four-million decoded pixels. It centre-crops/resizes to 288×288. Missing, unregistered, broken or oversized images return a generic record cover with HTTP 200 and `X-Artwork-Fallback: 1`. Successful covers cache for an hour, failing sources for 30 seconds; at most 32 converted covers, 256 source descriptors and two concurrent conversions are retained.
 
 Packets are exactly **165,896 bytes**, `application/octet-stream`: `MCAR` (four bytes), little-endian uint16 width=288 and height=288, then 82,944 little-endian RGB565 pixels in row-major order. No NVS/token changes are required to enable these endpoints. Live provider/physical-device acceptance remains pending despite mocked tests.
+
+## Local device settings (not MA commands)
+
+Native `/device/ws` messages with event `controller/settings/state` contain data:
+`device_id` (12 lowercase hex factory-MAC ID), `battery_seconds`, `usb_seconds`,
+`battery_default`, `usb_default` (integers 0–86400), `power_mode` (0 Auto, 1 battery,
+2 external), `power_source` (`unknown` until hardware detection is implemented),
+`request_id` (empty for unsolicited snapshots) and `saved` (boolean). State reports
+are sent after gateway readiness/reconnect and after preference changes.
+
+Gateway event `controller/settings/set` carries a 32-character lowercase hex
+`request_id`, both timeouts and power mode. Both timeouts -1 means reset overrides;
+otherwise both must be 0–86400. Firmware enqueues writes outside the WebSocket/UI
+callbacks, commits NVS, applies under the LVGL lock and reports the same request ID
+with `saved: true` only on success. The gateway does not relay either message to
+MA, expose arbitrary NVS keys, or replay settings after reconnect. Browser
+`GET /settings/api` returns connected snapshots; `PUT /settings/api/{device_id}`
+waits up to 12 seconds for the matching device/socket acknowledgement. Offline,
+busy, failed-save and unconfirmed-save responses are explicit.

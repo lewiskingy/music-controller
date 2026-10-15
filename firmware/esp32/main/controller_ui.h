@@ -75,6 +75,8 @@ typedef struct {
     lv_color_t *backdrop_pixels;
     bool backdrop_enabled, backdrop_loaded;
     void (*backdrop_cb)(bool enabled);
+    lv_obj_t *power_button, *power_panel, *power_battery, *power_usb, *power_mode, *power_feedback;
+    void (*power_cb)(int battery, int usb, int mode);
     unsigned palette;
     bool light;
     void (*theme_cb)(unsigned palette, bool light);
@@ -114,3 +116,5 @@ lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected
 
 void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled);
 bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length);
+
+void controller_ui_power(controller_ui_t *ui, int battery, int usb, int mode, const char *message);

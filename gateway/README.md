@@ -133,3 +133,24 @@ current boot, persists the opt-in in NVS, and retains the image during temporary
 network failures. Disabling/removing at the gateway clears clients on their next
 successful poll. A reboot needs one successful fetch; no image is written to flash.
 Older gateways and failed downloads leave the plain palette available.
+
+### Controller settings
+
+`/settings` (public proxy path `/controller/settings`) lists connected compatible
+physical controllers by stable device ID. Edit separate battery/external screen
+timeouts in seconds, select Auto/Battery/USB mode, or reset to provisioned defaults.
+Auto currently uses battery timing because reliable USB detection is unresolved.
+Defaults are 30 seconds on battery and 0 (always on) externally. Values are saved
+on each device, not in the gateway volume; offline devices reject changes.
+
+The existing authenticated `/device/ws` accepts `controller/settings/state`
+reports locally, without forwarding them to Music Assistant. Browser PUTs send a
+correlated `controller/settings/set` event to the selected socket and await its
+post-NVS-commit acknowledgement. A lost acknowledgement is explicitly unconfirmed;
+reload and verify. Concurrent saves to the same controller are rejected. Devices
+re-register after reconnect; gateway restarts require no preference recovery.
+
+The example Caddyfile routes `/controller/settings*` to `/settings*`; add the same
+LAN-only route to custom/Atlas reverse proxies. Writes require a same-host browser
+Origin (including Tailscale hostnames), or the configured `CONTROLLER_ORIGIN`.
+Reads/page access use the same trusted-LAN deployment model as the backdrop page.
