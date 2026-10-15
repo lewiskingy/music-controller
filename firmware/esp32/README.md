@@ -499,7 +499,7 @@ Touch/held touch renews the inactivity timer; metadata, progress, artwork and
 network events do not. On expiry only the backlight is switched off: touch,
 networking and playback state continue. The whole first touch gesture wakes the
 screen without operating a hidden control. This is backlight power saving,
-not deep sleep. Changes start a fresh timer; selecting external Always on wakes
+not deep sleep. Changes start a fresh timer; selecting an effective Always on timeout wakes
 an already dark screen. Hardware acceptance must verify backlight switching,
 first-touch suppression, offline operation and battery consumption on the board.
 

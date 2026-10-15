@@ -833,7 +833,7 @@ static void power_process(void) {
                 power_battery=reset ? default_battery : (unsigned)change.battery;
                 power_usb=reset ? default_usb : (unsigned)change.usb;
                 power_mode=change.mode; power_activity.last_touch=lv_tick_get();
-                if(power_mode==2 && power_usb==0 && power_activity.asleep && waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
+                if(power_timeout(power_battery,power_usb,power_mode)==0 && power_activity.asleep && waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
             }
             controller_ui_power(&ui,power_battery,power_usb,power_mode,err==ESP_OK?"Saved locally":"Save failed - retry");
             lvgl_port_unlock();
