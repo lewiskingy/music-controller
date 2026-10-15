@@ -770,12 +770,16 @@ static void source_chosen(lv_event_t *event) {
 }
 lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected) {
     lv_obj_t *row=button(list,name,0,0,352,72,source_chosen,NULL);
+    /* Align against the whole card, without the default button padding. */
+    lv_obj_set_style_pad_all(row,0,0);
+    lv_obj_set_style_border_width(row,0,0);
     lv_obj_t *caption=lv_obj_get_child(row,0);
-    lv_obj_set_align(caption,LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(caption,64,24); lv_obj_set_width(caption,264);
+    lv_obj_align(caption,LV_ALIGN_LEFT_MID,80,0); lv_obj_set_width(caption,248);
     lv_label_set_long_mode(caption,LV_LABEL_LONG_DOT);
-    label(row,LV_SYMBOL_AUDIO,16,24,40,MUTED,false);
-    lv_obj_t *image=lv_img_create(row); lv_obj_set_pos(image,12,16);
+    lv_obj_t *fallback=label(row,LV_SYMBOL_AUDIO,0,0,40,MUTED,false);
+    lv_obj_set_style_text_align(fallback,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(fallback,LV_ALIGN_LEFT_MID,28,0);
+    lv_obj_t *image=lv_img_create(row); lv_obj_align(image,LV_ALIGN_LEFT_MID,28,0);
     lv_obj_add_flag(image,LV_OBJ_FLAG_HIDDEN);
     if(selected) lv_obj_add_state(row,LV_STATE_CHECKED);
     bg(row,SELECTION,LV_STATE_CHECKED);

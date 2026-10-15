@@ -181,6 +181,20 @@ int main(int argc,char **argv) {
     click(ui.player_button); CHECK(!lv_obj_has_flag(ui.players_content,LV_OBJ_FLAG_HIDDEN));
     screenshot("02-players"); geometry();
     click(ui.settings_button); click(ui.sources_button); CHECK(!lv_obj_has_flag(ui.providers_content,LV_OBJ_FLAG_HIDDEN));
+    advance(100);
+    for(unsigned i=0;i<3;i++) {
+        lv_obj_t *row=lv_obj_get_child(ui.providers_list,i);
+        for(unsigned j=0;j<3;j++) {
+            lv_area_t card,child; lv_obj_get_coords(row,&card); lv_obj_get_coords(lv_obj_get_child(row,j),&child);
+            CHECK(abs((card.y1+card.y2)-(child.y1+child.y2))<=1);
+        }
+    }
+    /* Centre alignment must follow card height, not only the original 72px size. */
+    lv_obj_t *resize_row=lv_obj_get_child(ui.providers_list,0);
+    lv_obj_set_height(resize_row,88); advance(100);
+    lv_area_t card,icon; lv_obj_get_coords(resize_row,&card); lv_obj_get_coords(lv_obj_get_child(resize_row,2),&icon);
+    CHECK(abs((card.y1+card.y2)-(icon.y1+icon.y2))<=1);
+    lv_obj_set_height(resize_row,72); advance(100);
     screenshot("03-providers"); geometry();
     lv_obj_t *first_source=lv_obj_get_child(ui.providers_list,0), *second_source=lv_obj_get_child(ui.providers_list,1);
     click(second_source);
