@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "controller_ui.h"
 
 static controller_ui_t ui;
@@ -20,6 +21,12 @@ static unsigned saved_palette;
 static bool saved_light;
 static void theme_saved(unsigned palette,bool light) { theme_saves++; saved_palette=palette; saved_light=light; }
 #define CHECK(value) do { ++checks; if (!(value)) { fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#value); exit(1); } } while(0)
+static double luminance(lv_color_t color) {
+    lv_color32_t c; c.full=lv_color_to32(color);
+    double components[]={c.ch.red/255.0,c.ch.green/255.0,c.ch.blue/255.0};
+    for(unsigned i=0;i<3;i++) components[i]=components[i]<=0.04045 ? components[i]/12.92 : pow((components[i]+0.055)/1.055,2.4);
+    return 0.2126*components[0]+0.7152*components[1]+0.0722*components[2];
+}
 static void flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *colors) {
     for (int y = area->y1; y <= area->y2; ++y) {
         for (int x = area->x1; x <= area->x2; ++x) {
@@ -174,6 +181,20 @@ int main(int argc,char **argv) {
     click(ui.player_button); CHECK(!lv_obj_has_flag(ui.players_content,LV_OBJ_FLAG_HIDDEN));
     screenshot("02-players"); geometry();
     click(ui.settings_button); click(ui.sources_button); CHECK(!lv_obj_has_flag(ui.providers_content,LV_OBJ_FLAG_HIDDEN));
+    advance(100);
+    for(unsigned i=0;i<3;i++) {
+        lv_obj_t *row=lv_obj_get_child(ui.providers_list,i);
+        for(unsigned j=0;j<3;j++) {
+            lv_area_t card,child; lv_obj_get_coords(row,&card); lv_obj_get_coords(lv_obj_get_child(row,j),&child);
+            CHECK(abs((card.y1+card.y2)-(child.y1+child.y2))<=1);
+        }
+    }
+    /* Centre alignment must follow card height, not only the original 72px size. */
+    lv_obj_t *resize_row=lv_obj_get_child(ui.providers_list,0);
+    lv_obj_set_height(resize_row,88); advance(100);
+    lv_area_t card,icon; lv_obj_get_coords(resize_row,&card); lv_obj_get_coords(lv_obj_get_child(resize_row,2),&icon);
+    CHECK(abs((card.y1+card.y2)-(icon.y1+icon.y2))<=1);
+    lv_obj_set_height(resize_row,72); advance(100);
     screenshot("03-providers"); geometry();
     lv_obj_t *first_source=lv_obj_get_child(ui.providers_list,0), *second_source=lv_obj_get_child(ui.providers_list,1);
     click(second_source);
@@ -251,6 +272,23 @@ int main(int argc,char **argv) {
         CHECK(lv_obj_has_state(ui.palette_buttons[p],LV_STATE_CHECKED));
         CHECK(lv_obj_has_state(ui.mode_buttons[mode],LV_STATE_CHECKED));
         geometry();
+        click(ui.sources_button);
+        advance(100);
+        lv_color_t selected=lv_obj_get_style_bg_color(first_source,0);
+        lv_color_t unselected=lv_obj_get_style_bg_color(second_source,0);
+        CHECK(lv_color_to32(selected)!=lv_color_to32(unselected));
+        double background=luminance(selected);
+        double foreground=luminance(lv_obj_get_style_text_color(lv_obj_get_child(first_source,0),0));
+        CHECK((fmax(background,foreground)+0.05)/(fmin(background,foreground)+0.05)>=4.5);
+        if(p==5) {
+            lv_color32_t colour; colour.full=lv_color_to32(selected);
+            CHECK(colour.ch.blue>colour.ch.red && colour.ch.blue>colour.ch.green);
+        }
+        if(p==0 || p==5) {
+            char name[80]; snprintf(name,sizeof(name),"provider-selection-%s-%s",p==0?"green":"grey",mode?"light":"dark");
+            screenshot(name);
+        }
+        click(ui.settings_button);
         if(p==1 && mode==1) screenshot("theme-edit-settings");
         click(ui.navigation[0]); geometry();
         CHECK(lv_color_to32(lv_obj_get_style_bg_color(ui.timeline,LV_PART_INDICATOR))==
