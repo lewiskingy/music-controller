@@ -26,7 +26,8 @@ typedef struct {
     bool connected, available, playing, transport_pending, volume_pending, seek_pending;
     bool can_volume, can_seek, live, can_queue, can_browse, can_search;
 } ui_playback_t;
-enum { UI_QUEUE_PAGE_SIZE = 20 };
+enum { UI_QUEUE_PAGE_SIZE = 20, UI_PROVIDER_ICONS = 24 };
+typedef struct { char id[65]; lv_img_dsc_t image; uint8_t *pixels; } ui_provider_icon_t;
 typedef struct {
     char id[129], title[160], artist[160];
     int duration;
@@ -77,6 +78,10 @@ typedef struct {
     void (*backdrop_cb)(bool enabled);
     lv_obj_t *power_button, *power_panel, *power_battery, *power_usb, *power_mode, *power_feedback;
     void (*power_cb)(int battery, int usb, int mode);
+    ui_provider_icon_t provider_icons[UI_PROVIDER_ICONS];
+    unsigned provider_icon_next;
+    lv_obj_t *selected_provider_button, *selected_provider_image, *selected_provider_fallback;
+    lv_obj_t *source_badge, *source_image;
     unsigned palette;
     bool light;
     void (*theme_cb)(unsigned palette, bool light);
@@ -118,3 +123,9 @@ void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled);
 bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length);
 
 void controller_ui_power(controller_ui_t *ui, int battery, int usb, int mode, const char *message);
+
+/* MCPI 40x40 RGB565+A8; keep image buffers in UI-owned memory. */
+bool controller_ui_set_provider_icon(controller_ui_t *ui,const char *id,const unsigned char *packet,size_t length);
+const lv_img_dsc_t *controller_ui_provider_icon(controller_ui_t *ui,const char *id);
+void controller_ui_provider_badges(controller_ui_t *ui,const char *selected,const char *source);
+void controller_ui_source_icon(lv_obj_t *row,const lv_img_dsc_t *image);

@@ -154,3 +154,44 @@ The example Caddyfile routes `/controller/settings*` to `/settings*`; add the sa
 LAN-only route to custom/Atlas reverse proxies. Writes require a same-host browser
 Origin (including Tailscale hostnames), or the configured `CONTROLLER_ORIGIN`.
 Reads/page access use the same trusted-LAN deployment model as the backdrop page.
+
+### Provider logos
+
+The ESP32 header shows the selected browsing/search provider beside the player.
+The same full-colour icon is used on the selected provider row; other rows show
+grey icons and muted names. Selection is still exclusive and uses the existing
+explicit Save behavior. The Now Playing artwork badge identifies the actual
+stream provider independently of the selected browsing provider. Ambiguous or
+unknown sources have no badge: a multi-provider library item is not arbitrarily
+labelled with the first mapping or selected provider.
+
+The gateway discovers provider instances from authenticated MA `providers`
+responses, assigns opaque `controller_icon_id` values, and requests colour icons
+through MA `providers/icon` (`provider`, `variant: default`). Older servers can
+supply inline `icon_svg` through `providers/manifests`. Unsupported APIs, missing
+or invalid logos fall back to a generic icon without breaking playback.
+
+Open `/controller/settings/providers` (raw gateway `/settings/providers`) to
+preview discovered providers and upload a **per-instance** SVG, PNG, JPEG or WebP
+override, or remove it to return to MA's icon. This is useful for Navidrome:
+Music Assistant's provider can be OpenSubsonic and therefore have a generic
+Subsonic logo rather than a Navidrome logo. We do not assume that every
+OpenSubsonic server is Navidrome. Multiple accounts/servers can have different
+uploaded icons. No provider names or URLs need to be compiled into firmware.
+
+Overrides are normalized to transparent 40×40 pixels and atomically stored in
+`CONTROLLER_PROVIDER_ICONS_STATE` (default `/data/provider-icons.json`) on the
+existing persistent gateway volume. At most 64 overrides are supported. Uploads
+are limited to 256 KiB/one million decoded pixels; SVG external resources and
+embedded content are rejected. Original SVG/HTML is never served to browsers:
+previews are normalized PNG and native devices receive RGB565+A8 packets.
+The upload page uses the existing trusted-LAN/Tailscale settings route and
+same-host Origin checks. The existing Tailscale Serve mount also supports it.
+
+Device downloads use the existing authenticated artwork route:
+`/controller/device/artwork/provider-{controller_icon_id}`. Firmware refreshes
+icons approximately every 30 seconds in a worker and keeps a bounded PSRAM cache;
+transient failures retain the last valid icon. Existing Atlas settings/artwork
+routes are sufficient. Deploy the updated gateway and firmware; no NVS
+reprovisioning or additional proxy paths are required for this feature. A gateway
+release/pin update is still needed for Atlas deployment.
