@@ -18,8 +18,9 @@ before relying on driver behavior; do not assume newer documentation applies.
 ## Rendering and task ownership
 
 - Preserve BSP anti-tearing mode 3, direct rendering and 90-degree rotation.
-  Its rotated path uses a logical drawing buffer and two RGB panel buffers in
-  PSRAM, with VSYNC presentation. Preserve stale-sdkconfig compile guards.
+  The BSP allocates a logical drawing buffer and two RGB panel buffers in
+  PSRAM. `controller_display.c` owns rotation, bounce-frame completion and safe
+  buffer retirement; preserve stale-sdkconfig compile guards.
 - Build a screen/menu/dialog transition or substantial content replacement in one
   LVGL transaction. Work on the LVGL task or hold `lvgl_port_lock` throughout the
   application-side change. Finish all widget changes before unlocking.
@@ -27,10 +28,11 @@ before relying on driver behavior; do not assume newer documentation applies.
   use dirty regions through the same buffered path. Skip unchanged label values;
   do not repaint static artwork or rebuild lists on every metadata tick.
 - Never write directly to the displayed framebuffer, clear the panel from UI code
-  or manually swap buffers. The BSP owns rotation, buffer synchronization and
+  or manually swap buffers. The display adapter owns rotation, buffer synchronization and
   presentation. Do not force intermediate refreshes during a transition.
-- `lv_refr_now` must run on the BSP LVGL task: the flush waits for that task's
-  VSYNC notification. Holding the mutex on another task is insufficient.
+- Keep forced refreshes on the BSP LVGL task. The upstream BSP flush waits
+  for that task's notification; the installed adapter uses its own completion
+  semaphore. Do not rely on upstream task-notification behavior in new code.
 - Keep a minimal Loading page visible while preparing the initial main frame.
   Later transitions retain the previous frame until the replacement is ready.
   Do not wait for network access or artwork before showing useful startup UI.
@@ -73,7 +75,7 @@ application change. Preserve preference keys or provide an explicit migration.
 From the repository root, run the relevant firmware contract suite:
 
 ```sh
-python -m pytest -q tests/test_esp32_power.py tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
+python -m pytest -q tests/test_esp32_display.py tests/test_esp32_power.py tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
 ```
 
 For UI changes, build/run native acceptance against LVGL 8.3.11:
@@ -90,6 +92,11 @@ Use the gateway requirements for artwork-fixture dependencies. Follow
 `.github/workflows/firmware.yml` for the ESP-IDF build, ELF memory-layout check and
 artifact packaging. Tests should verify observable behavior, including stale
 responses and unnecessary redraws, rather than merely mirror implementation text.
+
+The native display simulator compiles the actual adapter and checks rotated
+pixels, damage retention and delayed completion interrupts. Its retirement test
+must keep the old panel buffer unchanged until it is no longer read by the
+modeled DMA refill. Do not replace it with source-string assertions.
 
 Native acceptance cannot prove physical VSYNC, RGB DMA bandwidth, touch alignment,
 battery behavior or TLS memory headroom. Identify hardware checks still needed:

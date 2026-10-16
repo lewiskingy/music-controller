@@ -31,6 +31,7 @@
 #include "bsp/lvgl_port.h"
 #include "lvgl.h"
 #include "controller_ui.h"
+#include "controller_display.h"
 #include "playback_policy.h"
 #include "power_policy.h"
 
@@ -983,7 +984,10 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *e
         log_memory("WebSocket error");
         status("WebSocket error");
     } else if (event_id == WEBSOCKET_EVENT_DATA && ev) {
-        ESP_LOGI(TAG, "WS frame: opcode=%d offset=%d length=%d total=%d",
+        /* Control frames are handled by esp_websocket_client; they are not
+         * fragmented JSON and must not reset an in-progress data message. */
+        if (ev->op_code == 0x9 || ev->op_code == 0xa) return;
+        ESP_LOGD(TAG, "WS frame: opcode=%d offset=%d length=%d total=%d",
                  ev->op_code, ev->payload_offset, ev->data_len, ev->payload_len);
         if (ev->payload_offset == 0) {
             reset_ws_message();
@@ -1602,6 +1606,7 @@ void app_main(void) {
     log_main_stack("LCD/touch init");
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_off());
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
+    ESP_ERROR_CHECK(controller_display_init(panel));
     loading_presented=xSemaphoreCreateBinary();
     ESP_ERROR_CHECK(loading_presented ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(lvgl_port_lock(2000) ? ESP_OK : ESP_ERR_TIMEOUT);
@@ -1756,6 +1761,7 @@ static void __attribute__((noinline)) controller_loop(void) {
                      (int)ip_ready, (int)ws_connected, (int)ready, (int)active_view);
             log_main_stack("runtime");
             log_memory("runtime");
+            controller_display_log();
             last_heartbeat = now;
         }
         vTaskDelay(pdMS_TO_TICKS(100));

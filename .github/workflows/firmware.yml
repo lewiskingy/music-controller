@@ -6,6 +6,7 @@ on:
       - 'tests/test_esp32*.py'
       - 'tests/test_playback_policy.py'
       - 'tests/native-ui/**'
+      - 'tests/native-display/**'
       - 'contracts/**'
       - '.github/workflows/firmware.yml'
       - 'tests/native-ui/**'
@@ -20,6 +21,7 @@ on:
       - 'tests/test_esp32*.py'
       - 'tests/test_playback_policy.py'
       - 'tests/native-ui/**'
+      - 'tests/native-display/**'
       - 'contracts/**'
       - '.github/workflows/firmware.yml'
       - 'tests/native-ui/**'
@@ -40,7 +42,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install pytest
       - name: Verify playback policy and native UI contracts
-        run: python -m pytest -q tests/test_esp32_power.py tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
+        run: python -m pytest -q tests/test_esp32_display.py tests/test_esp32_power.py tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
   ui-acceptance:
     runs-on: ubuntu-latest
     steps:

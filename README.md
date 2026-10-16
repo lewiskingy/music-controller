@@ -63,5 +63,5 @@ Originating initiative: [Atlas #577](https://github.com/lewiskingy/atlas/issues/
 
 The ESP32 UI uses VSYNC-synchronized buffered presentation for all updates, with
 whole-frame navigation and dirty-region control feedback. Startup shows a minimal Loading page while the main UI is prepared off-screen. See the firmware README's
-[rendering rules and hardware acceptance](firmware/esp32/README.md#buffered-presentation-and-startup-backlight)
+[rendering rules and hardware acceptance](firmware/esp32/README.md#buffered-presentation-and-startup-loading-page)
 before changing display, transition or refresh code.
