@@ -58,3 +58,10 @@ See [development and CI](docs/development.md) for commands and the change-to-wor
 Keep `.env` and `controller-nvs.bin` private. The browser origin check is not user authentication: deploy the controller on a trusted LAN and restrict access there. Never expose the example frontend or Music Assistant ports through public router forwarding.
 
 Originating initiative: [Atlas #577](https://github.com/lewiskingy/atlas/issues/577).
+
+### Firmware display rendering
+
+The ESP32 UI uses VSYNC-synchronized buffered presentation for all updates, with
+whole-frame navigation and dirty-region control feedback. Startup shows a minimal Loading page while the main UI is prepared off-screen. See the firmware README's
+[rendering rules and hardware acceptance](firmware/esp32/README.md#buffered-presentation-and-startup-backlight)
+before changing display, transition or refresh code.

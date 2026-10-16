@@ -546,3 +546,124 @@ muted text and grey icons. Shared styles update existing rows on theme changes.
 Native acceptance checks distinct selected/unselected fills and at least 4.5:1
 selected-caption contrast across all twelve palette/mode combinations, with
 representative Green and Grey screenshots in both modes.
+
+### Main-task stack overflow during startup
+
+`***ERROR*** A stack overflow in task main has been detected` during
+`Initialize Touch LCD` is an application startup stack failure. The old build
+used ESP-IDF's default 3584-byte main-task stack while the application's main
+frame also reserved large runtime command buffers. This can fail before the
+screen and network initialize. Erasing NVS or flashing the full image does not
+correct the application stack budget.
+
+The firmware now explicitly reserves 16384 bytes for the main task and keeps the
+runtime loop in a separate non-inlined function so its command buffers are not
+resident during hardware initialization. A compile-time guard rejects an existing
+`sdkconfig` with a smaller main stack: set
+`CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384` in menuconfig (or regenerate configuration
+from the defaults) before rebuilding. Application component frames larger than
+4096 bytes fail the build; compiler `.su` stack reports accompany CI artifacts.
+This frame limit does not prove the worst-case nested call-chain stack usage.
+
+Serial logs report configured stack size and the minimum free bytes after
+LCD/touch, UI and network initialization, then during runtime. Verify on the
+physical board that it gets beyond each phase, shows the UI, connects normally,
+and retains stack margin through rendering and playback controls.
+
+For an already provisioned board, close the serial monitor and flash the fixed
+application artifact only (substitute your COM port):
+
+```powershell
+py -m esptool --chip esp32s3 --port COM4 --baud 460800 write-flash 0x20000 music_controller.bin
+py -m serial.tools.miniterm COM4 115200
+```
+
+Do not erase flash or reapply NVS for this fix. The application partition, NVS
+layout and credentials are unchanged. A successful CI build is not a physical
+startup test; retain the new serial logs for hardware verification.
+### LVGL memory exhaustion during UI creation
+
+After the stack fix, a boot could reach `Creating diagnostic LVGL screen` and
+panic with `LoadProhibited` / `EXCVADDR: 0x00000020`. LVGL's default 32 KiB
+private pool is too small for this UI; native reproduction exhausted it while
+allocating a widget's local style. Initial UI creation alone used about 73 KiB
+on the 64-bit native test host (device sizes differ).
+
+LVGL now uses a custom malloc/realloc/free adapter explicitly backed by PSRAM,
+including small widget/style allocations. It shares available PSRAM with the
+framebuffers and artwork caches rather than reserving another fixed pool.
+Allocation failure logs the requested size and aborts with a useful backtrace.
+Startup logs report remaining PSRAM and its largest free block before/after UI
+creation. Native acceptance runs use LVGL's same custom allocator path.
+
+For existing local builds regenerate `sdkconfig` from defaults, or set
+`CONFIG_LV_MEM_CUSTOM=y` and
+`CONFIG_LV_MEM_CUSTOM_INCLUDE="controller_lvgl_memory.h"`. Stale allocator
+configuration fails compilation. CI artifacts include the matching `.elf` and
+`.map` files so exception addresses can be decoded with
+`xtensa-esp32s3-elf-addr2line -pfiaC -e music_controller.elf ADDRESS...`.
+Flash only the application at `0x20000` as above to preserve NVS.
+
+### TLS seed failure / SHA buffer allocation failure
+
+`ip=1 ws=0 gateway=0` with `esp-sha: Failed to allocate buf memory` and
+`ESP_ERR_MBEDTLS_CTR_DRBG_SEED_FAILED` indicates a local crypto allocation failure
+before the gateway WebSocket handshake. The SHA DMA adapter needs internal RAM;
+free PSRAM alone cannot satisfy that request.
+
+The controller's bulk UI state, player/provider lists, queue, browse and search
+caches now live in zero-initialized external BSS (about 130 KiB on ESP32-S3).
+mbedTLS allocations explicitly use PSRAM, while 64 KiB of internal memory is
+reserved from ordinary malloc for internal-only allocations such as task stacks
+and DMA buffers. This reserve is shared, not a dedicated SHA buffer. Hardware
+SHA remains enabled and TLS certificate/time validation remains enabled.
+
+Existing local builds must enable `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`
+and `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`, and set
+`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536`, or regenerate sdkconfig.
+Connection and heartbeat logs show internal free bytes, largest internal/DMA
+blocks, and free PSRAM. Verify successful `gateway/ready` and repeat with artwork,
+provider icons and backdrop requests on the physical board.
+
+### Buffered presentation and startup backlight
+
+All drawing uses LVGL and the pinned BSP's **anti-tearing mode 3 (direct mode)**,
+with 90-degree rotation. The rotated path uses one full logical drawing buffer
+and two RGB panel buffers in PSRAM (three 768,000-byte buffers, about 2.20 MiB).
+The BSP rotates/copies completed dirty regions into the secondary panel buffer,
+presents it at VSYNC and synchronizes the other panel buffer for later updates.
+This was already selected in defaults; firmware now rejects stale configurations
+that disable it or select another mode/rotation.
+
+Rendering rules for future changes:
+
+- Build screen/menu/dialog and substantial content changes in one LVGL transaction:
+  on the LVGL task, or under `lvgl_port_lock` from application tasks. Finish the
+  entire change before unlocking. Screen navigation invalidates the complete root.
+- Keep button feedback, selection, typing, search results and playback progress on
+  the same buffered presentation path. Dirty-region rendering avoids repainting
+  unrelated artwork; it does not permit writes into the active panel buffer.
+- Do not clear the visible panel, draw directly with panel APIs, or manually swap
+  buffers from UI code. The BSP owns rotation, buffer synchronization and VSYNC.
+- Do not force intermediate refreshes during a transition. In particular,
+  `lv_refr_now` must run on the BSP LVGL task: its flush waits for that task's
+  VSYNC notification. A mutex alone does not make another task suitable.
+- Skip unchanged text updates. Network/metadata ticks must not repeatedly
+  invalidate static labels. Download assets outside UI locks and apply complete,
+  validated assets inside one transaction.
+
+Startup first presents a minimal “Loading...” page using a one-shot LVGL timer,
+then enables the backlight. The application waits for that presentation before
+building the main UI, saved theme and initial state in one locked transaction.
+The loading frame stays visible until the BSP presents the completed main frame.
+This does not wait for Wi-Fi, the gateway or artwork. Later transitions retain
+the previous frame rather than inserting a loading page. The board's hardware
+reset sequence can still cause a flash before software backlight control exists.
+
+Hardware acceptance: cold boot and reset with/without provisioning or network;
+rapid navigation through every view and Screen power; keyboard/results, changing
+tracks/albums, provider icons and backdrop; idle with playback stopped and while
+progress advances; timeout and first-touch wake. Look for blank flashes, partial
+frames, tearing or panel jitter. Native tests validate UI behavior, not physical
+VSYNC timing or RGB DMA bandwidth. Continued flicker needs a short video and
+serial logs to distinguish UI invalidation from panel/DMA or power problems.

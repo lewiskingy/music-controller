@@ -7,6 +7,12 @@
 #include "esp_heap_caps.h"
 #endif
 
+/* LVGL invalidates labels even for identical text. Preserve idle frames and
+ * restrict playback ticks to the controls whose displayed values changed. */
+static void label_text(lv_obj_t *label, const char *text) {
+    if (strcmp(lv_label_get_text(label),text)) lv_label_set_text(label,text);
+}
+
 /* Semantic colours are shared styles, so new and existing controls update together. */
 enum { BG, SURFACE, CARD, ACTIVE, TEXT, MUTED, ACCENT, SELECTION, ON_SELECTION, ROLE_COUNT };
 static lv_style_t backgrounds[ROLE_COUNT], foregrounds[ROLE_COUNT];
@@ -104,7 +110,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_width(obj, w);
     lv_obj_set_height(obj, large ? 30 : 24);
-    lv_label_set_text(obj, text);
+    label_text(obj, text);
     lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
     fg(obj, color, 0);
     if (large) lv_obj_set_style_text_font(obj, &lv_font_montserrat_24, 0);
@@ -124,7 +130,7 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_set_style_opa(obj, LV_OPA_40, LV_STATE_DISABLED);
     if (cb) lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, data);
     lv_obj_t *caption = lv_label_create(obj);
-    lv_label_set_text(caption, text);
+    label_text(caption, text);
     lv_obj_center(caption);
     return obj;
 }
@@ -148,7 +154,7 @@ static void dock_clicked(lv_event_t *event) {
 static void time_text(lv_obj_t *label_obj, int seconds) {
     char text[24];
     snprintf(text, sizeof(text), "%d:%02d", seconds / 60, seconds % 60);
-    lv_label_set_text(label_obj, text);
+    label_text(label_obj, text);
 }
 static void slider_event(lv_event_t *event) {
     controller_ui_t *ui = lv_event_get_user_data(event);
@@ -167,7 +173,7 @@ static void slider_event(lv_event_t *event) {
         if (volume) {
             char text[24];
             snprintf(text, sizeof(text), "~%d%%", value);
-            lv_label_set_text(ui->volume, text);
+            label_text(ui->volume, text);
             if (lv_tick_elaps(ui->last_volume_send) >= 300) {
                 send_intent(ui, UI_VOLUME_SET, value, gesture);
                 ui->last_volume_send = lv_tick_get();
@@ -332,7 +338,7 @@ void controller_ui_power(controller_ui_t *ui,int battery,int usb,int mode,const 
     lv_spinbox_set_value(ui->power_battery,battery);
     lv_spinbox_set_value(ui->power_usb,usb);
     lv_dropdown_set_selected(ui->power_mode,mode);
-    lv_label_set_text(ui->power_feedback,message);
+    label_text(ui->power_feedback,message);
 }
 void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t action_cb,
                           lv_event_cb_t players_cb, lv_event_cb_t providers_cb,
@@ -355,7 +361,7 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     lv_obj_set_width(ui->player_text, 164);
     ui->selected_provider_button=button(header,"",424,8,48,48,providers_cb,NULL);
     ui->selected_provider_fallback=lv_obj_get_child(ui->selected_provider_button,0);
-    lv_label_set_text(ui->selected_provider_fallback,LV_SYMBOL_AUDIO);
+    label_text(ui->selected_provider_fallback,LV_SYMBOL_AUDIO);
     ui->selected_provider_image=lv_img_create(ui->selected_provider_button);
     lv_obj_center(ui->selected_provider_image);
     lv_obj_add_flag(ui->selected_provider_image,LV_OBJ_FLAG_HIDDEN);
@@ -551,8 +557,10 @@ void controller_ui_show(controller_ui_t *ui, ui_view_t view) {
         if (i == (unsigned)view) lv_obj_clear_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(panes[i], LV_OBJ_FLAG_HIDDEN);
     }
+    /* One complete transition, rendered after the enclosing LVGL transaction. */
+    lv_obj_invalidate(ui->root);
     const char *titles[] = {"Now Playing", "Players", "Providers", "Settings", "Queue", "Browse", "Search"};
-    lv_label_set_text(ui->heading, titles[view]);
+    label_text(ui->heading, titles[view]);
     for (unsigned i = 0; i < 4; ++i) {
         lv_obj_remove_style(ui->navigation[i], &backgrounds[ACTIVE], 0);
         lv_obj_remove_style(ui->navigation[i], &backgrounds[BG], 0);
@@ -606,17 +614,17 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
     snprintf(ui->current.queue_id, sizeof(ui->current.queue_id), "%s", state->queue_id);
     snprintf(ui->current.item_id, sizeof(ui->current.item_id), "%s", state->item_id);
     ui->track_duration = state->duration;
-    lv_label_set_text(ui->title, state->track);
-    lv_label_set_text(ui->artist, state->artist);
-    lv_label_set_text(ui->album, state->album);
-    lv_label_set_text(ui->mini_title, state->track);
+    label_text(ui->title, state->track);
+    label_text(ui->artist, state->artist);
+    label_text(ui->album, state->album);
+    label_text(ui->mini_title, state->track);
     char text[260];
     snprintf(text, sizeof(text), "%s%s%s", state->artist, state->artist[0] ? " - " : "", state->player);
-    lv_label_set_text(ui->mini_artist, text);
+    label_text(ui->mini_artist, text);
     snprintf(text, sizeof(text), "%s%s", state->connected ? "" : "Offline - ", state->player);
-    lv_label_set_text(ui->player_text, text);
-    lv_label_set_text(ui->status, state->status);
-    lv_label_set_text(ui->transport_text, state->playing ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
+    label_text(ui->player_text, text);
+    label_text(ui->status, state->status);
+    label_text(ui->transport_text, state->playing ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
     bool can_control = state->connected && state->available;
     for (unsigned i = 0; i < 3; ++i) enabled(ui->transport[i], can_control && !state->transport_pending);
     bool volume_enabled = can_control && state->can_volume;
@@ -626,7 +634,7 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
     if (!ui->volume_dragging || !ui->volume_valid) {
         lv_slider_set_value(ui->volume_slider, state->volume, LV_ANIM_OFF);
         snprintf(text, sizeof(text), "%d%%%s", state->volume, state->volume_pending ? "*" : "");
-        lv_label_set_text(ui->volume, text);
+        label_text(ui->volume, text);
     }
     enabled(ui->timeline, can_control && state->can_seek && !state->seek_pending && !state->transport_pending);
     if (!ui->seek_dragging || !ui->seek_valid) {
@@ -634,9 +642,9 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
         lv_slider_set_value(ui->timeline, state->position, LV_ANIM_OFF);
         time_text(ui->elapsed, state->position);
     }
-    if (state->live) { lv_label_set_text(ui->elapsed, "Live"); lv_label_set_text(ui->duration, ""); }
+    if (state->live) { label_text(ui->elapsed, "Live"); label_text(ui->duration, ""); }
     else if (state->duration > 0) time_text(ui->duration, state->duration);
-    else lv_label_set_text(ui->duration, "--:--");
+    else label_text(ui->duration, "--:--");
 }
 
 static void *art_allocate(size_t bytes) {
@@ -682,8 +690,8 @@ void controller_ui_queue(controller_ui_t *ui, const ui_queue_item_t *items, unsi
     char text[100];
     if(count) snprintf(text,sizeof(text),"%d-%d of %d tracks",offset+1,offset+(int)count,total);
     else snprintf(text,sizeof(text),"Queue");
-    lv_label_set_text(ui->queue_info,text);
-    lv_label_set_text(ui->queue_feedback,message);
+    label_text(ui->queue_info,text);
+    label_text(ui->queue_feedback,message);
     enabled(ui->queue_back,!loading && offset>0);
     enabled(ui->queue_more,!loading && offset+(int)count<total);
     enabled(ui->queue_refresh,!loading);
@@ -710,7 +718,7 @@ void controller_ui_browse(controller_ui_t *ui, const ui_media_item_t *items, uns
     bool can_back, bool previous, bool more, const char *parent_uri, unsigned generation) {
     lv_obj_clean(ui->browse_list); ui->browse_count=0; ui->browse_loading=loading;
     if(count>UI_QUEUE_PAGE_SIZE) count=UI_QUEUE_PAGE_SIZE;
-    lv_label_set_text(ui->browse_info,heading); lv_label_set_text(ui->browse_feedback,message);
+    label_text(ui->browse_info,heading); label_text(ui->browse_feedback,message);
     enabled(ui->browse_back,can_back); enabled(ui->browse_previous,!loading && previous);
     enabled(ui->browse_more,!loading && more); enabled(ui->browse_refresh,!loading);
     bool album=parent_uri && parent_uri[0];
@@ -740,7 +748,7 @@ void controller_ui_search(controller_ui_t *ui,const ui_media_item_t *items,unsig
     lv_obj_clean(ui->search_list); ui->search_count=0; ui->search_loading=loading;
     ui->search_generation=generation;
     if(count>UI_QUEUE_PAGE_SIZE) count=UI_QUEUE_PAGE_SIZE;
-    lv_label_set_text(ui->search_source,provider); lv_label_set_text(ui->search_feedback,message);
+    label_text(ui->search_source,provider); label_text(ui->search_feedback,message);
     for(unsigned i=0;i<count;i++) {
         bool playable=items[i].kind==UI_MEDIA_TRACK;
         lv_obj_t *row=media_row(ui->search_list,items[i].title,items[i].subtitle,
@@ -846,7 +854,7 @@ void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled) {
     lv_obj_set_style_bg_img_src(ui->root,visible ? &ui->backdrop_descriptor : NULL,0);
     lv_style_set_bg_opa(&backgrounds[BG],visible ? LV_OPA_40 : LV_OPA_COVER);
     lv_obj_report_style_change(&backgrounds[BG]);
-    if(ui->backdrop_button) lv_label_set_text(lv_obj_get_child(ui->backdrop_button,0),enabled ? "Backdrop: gateway" : "Backdrop: off");
+    if(ui->backdrop_button) label_text(lv_obj_get_child(ui->backdrop_button,0),enabled ? "Backdrop: gateway" : "Backdrop: off");
 }
 bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length) {
     if(!packet) {
