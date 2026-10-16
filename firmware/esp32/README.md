@@ -624,3 +624,46 @@ and `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`, and set
 Connection and heartbeat logs show internal free bytes, largest internal/DMA
 blocks, and free PSRAM. Verify successful `gateway/ready` and repeat with artwork,
 provider icons and backdrop requests on the physical board.
+
+### Buffered presentation and startup backlight
+
+All drawing uses LVGL and the pinned BSP's **anti-tearing mode 3 (direct mode)**,
+with 90-degree rotation. The rotated path uses one full logical drawing buffer
+and two RGB panel buffers in PSRAM (three 768,000-byte buffers, about 2.20 MiB).
+The BSP rotates/copies completed dirty regions into the secondary panel buffer,
+presents it at VSYNC and synchronizes the other panel buffer for later updates.
+This was already selected in defaults; firmware now rejects stale configurations
+that disable it or select another mode/rotation.
+
+Rendering rules for future changes:
+
+- Build screen/menu/dialog and substantial content changes in one LVGL transaction:
+  on the LVGL task, or under `lvgl_port_lock` from application tasks. Finish the
+  entire change before unlocking. Screen navigation invalidates the complete root.
+- Keep button feedback, selection, typing, search results and playback progress on
+  the same buffered presentation path. Dirty-region rendering avoids repainting
+  unrelated artwork; it does not permit writes into the active panel buffer.
+- Do not clear the visible panel, draw directly with panel APIs, or manually swap
+  buffers from UI code. The BSP owns rotation, buffer synchronization and VSYNC.
+- Do not force intermediate refreshes during a transition. In particular,
+  `lv_refr_now` must run on the BSP LVGL task: its flush waits for that task's
+  VSYNC notification. A mutex alone does not make another task suitable.
+- Skip unchanged text updates. Network/metadata ticks must not repeatedly
+  invalidate static labels. Download assets outside UI locks and apply complete,
+  validated assets inside one transaction.
+
+Startup first presents a minimal “Loading...” page using a one-shot LVGL timer,
+then enables the backlight. The application waits for that presentation before
+building the main UI, saved theme and initial state in one locked transaction.
+The loading frame stays visible until the BSP presents the completed main frame.
+This does not wait for Wi-Fi, the gateway or artwork. Later transitions retain
+the previous frame rather than inserting a loading page. The board's hardware
+reset sequence can still cause a flash before software backlight control exists.
+
+Hardware acceptance: cold boot and reset with/without provisioning or network;
+rapid navigation through every view and Screen power; keyboard/results, changing
+tracks/albums, provider icons and backdrop; idle with playback stopped and while
+progress advances; timeout and first-touch wake. Look for blank flashes, partial
+frames, tearing or panel jitter. Native tests validate UI behavior, not physical
+VSYNC timing or RGB DMA bandwidth. Continued flicker needs a short video and
+serial logs to distinguish UI invalidation from panel/DMA or power problems.

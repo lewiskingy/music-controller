@@ -47,6 +47,11 @@
 #error "Music Controller requires external BSS and TLS allocation; regenerate sdkconfig from defaults"
 #endif
 
+/* The rotated BSP direct-mode path stages pixels before a VSYNC panel swap. */
+#if !CONFIG_LVGL_PORT_AVOID_TEAR_ENABLE || CONFIG_LVGL_PORT_AVOID_TEAR_MODE != 3 || CONFIG_LVGL_PORT_ROTATION_DEGREE != 90
+#error "Music Controller requires anti-tearing direct mode 3 and rotation 90; regenerate sdkconfig"
+#endif
+
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
@@ -1569,6 +1574,17 @@ static void init_screen(void) {
     update_now_playing();
 }
 
+/* Run on the BSP LVGL task: its flush waits for that task's VSYNC notification.
+ * Never call lv_refr_now from app_main, even while holding the LVGL mutex. */
+static SemaphoreHandle_t loading_presented;
+static void reveal_loading_frame(lv_timer_t *timer) {
+    lv_refr_now(lv_disp_get_default());
+    ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
+    ESP_LOGI(TAG,"Loading frame presented; backlight enabled");
+    xSemaphoreGive(loading_presented);
+    lv_timer_del(timer);
+}
+
 static void __attribute__((noinline)) controller_loop(void);
 static void log_main_stack(const char *stage) {
     ESP_LOGI(TAG,"Main stack after %s: configured=%d minimum_free=%u bytes",
@@ -1584,8 +1600,21 @@ void app_main(void) {
     esp_lcd_touch_handle_t touch = NULL;
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
     log_main_stack("LCD/touch init");
+    ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_off());
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
-    ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
+    loading_presented=xSemaphoreCreateBinary();
+    ESP_ERROR_CHECK(loading_presented ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(lvgl_port_lock(2000) ? ESP_OK : ESP_ERR_TIMEOUT);
+    lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x101b19),0);
+    lv_obj_t *loading=lv_label_create(lv_scr_act());
+    lv_label_set_text(loading,"Loading...");
+    lv_obj_set_style_text_color(loading,lv_color_hex(0xf0f5ed),0);
+    lv_obj_center(loading);
+    lv_timer_t *reveal=lv_timer_create(reveal_loading_frame,1,NULL);
+    ESP_ERROR_CHECK(reveal ? ESP_OK : ESP_ERR_NO_MEM);
+    lvgl_port_unlock();
+    ESP_ERROR_CHECK(xSemaphoreTake(loading_presented,pdMS_TO_TICKS(5000))==pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT);
+    /* The one-shot callback has finished before this lock can be acquired. */
     esp_err_t err = nvs_flash_init();
     power_queue=xQueueCreate(8,sizeof(power_change_t));
     ESP_ERROR_CHECK(power_queue ? ESP_OK : ESP_ERR_NO_MEM);
@@ -1595,6 +1624,7 @@ void app_main(void) {
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
     if (lvgl_port_lock(2000)) {
+        lv_obj_clean(lv_scr_act());
         init_screen();
         lv_obj_invalidate(lv_scr_act());
         lvgl_port_unlock();
@@ -1603,7 +1633,10 @@ void app_main(void) {
         ESP_LOGI(TAG,"PSRAM after UI init: free=%u largest=%u bytes",
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
-    } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire LVGL lock");
+        ESP_ERROR_CHECK(ESP_ERR_TIMEOUT);
+    }
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
     ESP_ERROR_CHECK(xTaskCreate(backdrop_worker,"backdrop",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);

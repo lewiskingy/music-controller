@@ -12,6 +12,8 @@ static ui_intent_t last_intent;
 static unsigned intent_count;
 static const char *output_dir;
 static unsigned checks, screenshots, theme_saves;
+static unsigned title_draws;
+static void title_drawn(lv_event_t *event) { (void)event; ++title_draws; }
 static int saved_battery, saved_usb, saved_power_mode;
 static unsigned power_saves;
 static void power_saved(int battery,int usb,int mode) {
@@ -170,6 +172,12 @@ int main(int argc,char **argv) {
         .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true,.can_search=true};
     controller_ui_provider_badges(&ui,icon_ids[0],icon_ids[2]);
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
+    /* Identical gateway snapshots must not invalidate static track labels. */
+    advance(500);
+    lv_obj_add_event_cb(ui.title,title_drawn,LV_EVENT_DRAW_MAIN,NULL);
+    unsigned before_title_draws=title_draws;
+    controller_ui_update(&ui,&state); advance(100);
+    CHECK(title_draws==before_title_draws);
     CHECK(!lv_obj_has_flag(ui.source_badge,LV_OBJ_FLAG_HIDDEN));
     CHECK(lv_img_get_src(ui.selected_provider_image)!=lv_img_get_src(ui.source_image));
     click(ui.transport[0]); CHECK(intent_count==1 && last_intent.type==UI_PREVIOUS);
