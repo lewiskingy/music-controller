@@ -38,7 +38,7 @@
 #error "Music Controller requires CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 16384; update sdkconfig or rebuild cleanly"
 #endif
 
-#if !LV_MEM_CUSTOM || !defined(CONTROLLER_LVGL_MEMORY_H)
+#if !LV_MEM_CUSTOM
 #error "Music Controller requires the PSRAM LVGL allocator; regenerate sdkconfig from defaults"
 #endif
 

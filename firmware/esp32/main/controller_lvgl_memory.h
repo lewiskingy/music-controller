@@ -1,6 +1,10 @@
 #ifndef CONTROLLER_LVGL_MEMORY_H
 #define CONTROLLER_LVGL_MEMORY_H
 #include <stdlib.h>
+/* lv_conf_internal.h supplies defaults before lv_mem.c includes this adapter. */
+#undef LV_MEM_CUSTOM_ALLOC
+#undef LV_MEM_CUSTOM_REALLOC
+#undef LV_MEM_CUSTOM_FREE
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_log.h"
