@@ -97,7 +97,9 @@ jobs:
           mkdir -p ../../dist/esp32
           cp build/bootloader/bootloader.bin ../../dist/esp32/
           cp build/partition_table/partition-table.bin ../../dist/esp32/
-          cp build/music_controller.bin ../../dist/esp32/
+          cp build/music_controller.bin build/music_controller.elf build/music_controller.map ../../dist/esp32/
+          . /opt/esp/idf/export.sh
+          xtensa-esp32s3-elf-addr2line -pfiaC -e build/music_controller.elf 0x4202242a 0x42038ad9 0x420dcda1 0x420241d5 0x4201e0ec 0x4202c997 0x42012de2 0x42013e35 0x4201030f 0x42012443 0x420e6faf 0x4037f251
           cp build/flash_args ../../dist/esp32/
           # Compiler stack reports complement the on-device low-water diagnostics.
           find build/esp-idf/main -name '*.su' -exec cp {} ../../dist/esp32/ \;
