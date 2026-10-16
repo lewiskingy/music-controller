@@ -38,6 +38,10 @@
 #error "Music Controller requires CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 16384; update sdkconfig or rebuild cleanly"
 #endif
 
+#if !LV_MEM_CUSTOM || !defined(CONTROLLER_LVGL_MEMORY_H)
+#error "Music Controller requires the PSRAM LVGL allocator; regenerate sdkconfig from defaults"
+#endif
+
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
@@ -1571,6 +1575,9 @@ void app_main(void) {
     power_queue=xQueueCreate(8,sizeof(power_change_t));
     ESP_ERROR_CHECK(power_queue ? ESP_OK : ESP_ERR_NO_MEM);
     power_load();
+    ESP_LOGI(TAG, "LVGL PSRAM allocator: free=%u largest=%u bytes",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     ESP_LOGI(TAG, "Creating diagnostic LVGL screen");
     if (lvgl_port_lock(2000)) {
         init_screen();
@@ -1578,6 +1585,9 @@ void app_main(void) {
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
         log_main_stack("UI init");
+        ESP_LOGI(TAG,"PSRAM after UI init: free=%u largest=%u bytes",
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }

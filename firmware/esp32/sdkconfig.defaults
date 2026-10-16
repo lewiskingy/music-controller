@@ -23,3 +23,7 @@ CONFIG_LV_FONT_DEFAULT_MONTSERRAT_18=y
 
 # Display/touch bring-up, UI rendering and network setup exceed IDF's 3584-byte default.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# UI creation exceeds LVGL's 32 KiB default pool. Use the board's 8 MiB PSRAM.
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEM_CUSTOM_INCLUDE="controller_lvgl_memory.h"

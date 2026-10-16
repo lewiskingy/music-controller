@@ -581,3 +581,25 @@ py -m serial.tools.miniterm COM4 115200
 Do not erase flash or reapply NVS for this fix. The application partition, NVS
 layout and credentials are unchanged. A successful CI build is not a physical
 startup test; retain the new serial logs for hardware verification.
+### LVGL memory exhaustion during UI creation
+
+After the stack fix, a boot could reach `Creating diagnostic LVGL screen` and
+panic with `LoadProhibited` / `EXCVADDR: 0x00000020`. LVGL's default 32 KiB
+private pool is too small for this UI; native reproduction exhausted it while
+allocating a widget's local style. Initial UI creation alone used about 73 KiB
+on the 64-bit native test host (device sizes differ).
+
+LVGL now uses a custom malloc/realloc/free adapter explicitly backed by PSRAM,
+including small widget/style allocations. It shares available PSRAM with the
+framebuffers and artwork caches rather than reserving another fixed pool.
+Allocation failure logs the requested size and aborts with a useful backtrace.
+Startup logs report remaining PSRAM and its largest free block before/after UI
+creation. Native acceptance runs use LVGL's same custom allocator path.
+
+For existing local builds regenerate `sdkconfig` from defaults, or set
+`CONFIG_LV_MEM_CUSTOM=y` and
+`CONFIG_LV_MEM_CUSTOM_INCLUDE="controller_lvgl_memory.h"`. Stale allocator
+configuration fails compilation. CI artifacts include the matching `.elf` and
+`.map` files so exception addresses can be decoded with
+`xtensa-esp32s3-elf-addr2line -pfiaC -e music_controller.elf ADDRESS...`.
+Flash only the application at `0x20000` as above to preserve NVS.
