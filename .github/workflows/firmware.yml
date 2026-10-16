@@ -99,6 +99,8 @@ jobs:
           cp build/partition_table/partition-table.bin ../../dist/esp32/
           cp build/music_controller.bin ../../dist/esp32/
           cp build/flash_args ../../dist/esp32/
+          # Compiler stack reports complement the on-device low-water diagnostics.
+          find build/esp-idf/main -name '*.su' -exec cp {} ../../dist/esp32/ \;
           cp build/ota_data_initial.bin ../../dist/esp32/
           (cd ../../dist/esp32 && sha256sum *.bin flash_args > SHA256SUMS)
       - name: Create single-file USB flash image

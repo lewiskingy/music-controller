@@ -546,3 +546,38 @@ muted text and grey icons. Shared styles update existing rows on theme changes.
 Native acceptance checks distinct selected/unselected fills and at least 4.5:1
 selected-caption contrast across all twelve palette/mode combinations, with
 representative Green and Grey screenshots in both modes.
+
+### Main-task stack overflow during startup
+
+`***ERROR*** A stack overflow in task main has been detected` during
+`Initialize Touch LCD` is an application startup stack failure. The old build
+used ESP-IDF's default 3584-byte main-task stack while the application's main
+frame also reserved large runtime command buffers. This can fail before the
+screen and network initialize. Erasing NVS or flashing the full image does not
+correct the application stack budget.
+
+The firmware now explicitly reserves 16384 bytes for the main task and keeps the
+runtime loop in a separate non-inlined function so its command buffers are not
+resident during hardware initialization. A compile-time guard rejects an existing
+`sdkconfig` with a smaller main stack: set
+`CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384` in menuconfig (or regenerate configuration
+from the defaults) before rebuilding. Application component frames larger than
+4096 bytes fail the build; compiler `.su` stack reports accompany CI artifacts.
+This frame limit does not prove the worst-case nested call-chain stack usage.
+
+Serial logs report configured stack size and the minimum free bytes after
+LCD/touch, UI and network initialization, then during runtime. Verify on the
+physical board that it gets beyond each phase, shows the UI, connects normally,
+and retains stack margin through rendering and playback controls.
+
+For an already provisioned board, close the serial monitor and flash the fixed
+application artifact only (substitute your COM port):
+
+```powershell
+py -m esptool --chip esp32s3 --port COM4 --baud 460800 write-flash 0x20000 music_controller.bin
+py -m serial.tools.miniterm COM4 115200
+```
+
+Do not erase flash or reapply NVS for this fix. The application partition, NVS
+layout and credentials are unchanged. A successful CI build is not a physical
+startup test; retain the new serial logs for hardware verification.

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "sdkconfig.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -31,6 +32,11 @@
 #include "controller_ui.h"
 #include "playback_policy.h"
 #include "power_policy.h"
+
+/* sdkconfig.defaults does not override an existing sdkconfig: fail closed on stale builds. */
+#if CONFIG_ESP_MAIN_TASK_STACK_SIZE < 16384
+#error "Music Controller requires CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 16384; update sdkconfig or rebuild cleanly"
+#endif
 
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
@@ -1544,6 +1550,12 @@ static void init_screen(void) {
     update_now_playing();
 }
 
+static void __attribute__((noinline)) controller_loop(void);
+static void log_main_stack(const char *stage) {
+    ESP_LOGI(TAG,"Main stack after %s: configured=%d minimum_free=%u bytes",
+        stage,CONFIG_ESP_MAIN_TASK_STACK_SIZE,(unsigned)uxTaskGetStackHighWaterMark(NULL));
+}
+
 void app_main(void) {
     ESP_LOGI(TAG, "Boot reset reason=%d", (int)esp_reset_reason());
     state_mutex = xSemaphoreCreateMutex();
@@ -1552,6 +1564,7 @@ void app_main(void) {
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_touch_handle_t touch = NULL;
     ESP_ERROR_CHECK(waveshare_esp32_s3_rgb_lcd_init(&panel, &touch));
+    log_main_stack("LCD/touch init");
     ESP_ERROR_CHECK(lvgl_port_init(panel, touch));
     ESP_ERROR_CHECK(waveshare_rgb_lcd_bl_on());
     esp_err_t err = nvs_flash_init();
@@ -1564,6 +1577,7 @@ void app_main(void) {
         lv_obj_invalidate(lv_scr_act());
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
+        log_main_stack("UI init");
     } else ESP_LOGE(TAG, "Failed to acquire LVGL lock");
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
@@ -1596,6 +1610,12 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_netif_sntp_init(&time_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
+    log_main_stack("network init");
+    controller_loop();
+}
+
+/* Keep runtime command-buffer frames out of LCD/touch startup, even with optimization. */
+static void __attribute__((noinline)) controller_loop(void) {
     bool started = false;
     int64_t last_refresh = 0;
     int64_t last_heartbeat = 0;
@@ -1674,6 +1694,7 @@ void app_main(void) {
         if (now - last_heartbeat >= 5000000LL) {
             ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d view=%d",
                      (int)ip_ready, (int)ws_connected, (int)ready, (int)active_view);
+            log_main_stack("runtime");
             last_heartbeat = now;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
