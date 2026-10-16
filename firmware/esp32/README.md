@@ -603,3 +603,24 @@ configuration fails compilation. CI artifacts include the matching `.elf` and
 `.map` files so exception addresses can be decoded with
 `xtensa-esp32s3-elf-addr2line -pfiaC -e music_controller.elf ADDRESS...`.
 Flash only the application at `0x20000` as above to preserve NVS.
+
+### TLS seed failure / SHA buffer allocation failure
+
+`ip=1 ws=0 gateway=0` with `esp-sha: Failed to allocate buf memory` and
+`ESP_ERR_MBEDTLS_CTR_DRBG_SEED_FAILED` indicates a local crypto allocation failure
+before the gateway WebSocket handshake. The SHA DMA adapter needs internal RAM;
+free PSRAM alone cannot satisfy that request.
+
+The controller's bulk UI state, player/provider lists, queue, browse and search
+caches now live in zero-initialized external BSS (about 130 KiB on ESP32-S3).
+mbedTLS allocations explicitly use PSRAM, while 64 KiB of internal memory is
+reserved from ordinary malloc for internal-only allocations such as task stacks
+and DMA buffers. This reserve is shared, not a dedicated SHA buffer. Hardware
+SHA remains enabled and TLS certificate/time validation remains enabled.
+
+Existing local builds must enable `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`
+and `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`, and set
+`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536`, or regenerate sdkconfig.
+Connection and heartbeat logs show internal free bytes, largest internal/DMA
+blocks, and free PSRAM. Verify successful `gateway/ready` and repeat with artwork,
+provider icons and backdrop requests on the physical board.

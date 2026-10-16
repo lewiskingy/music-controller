@@ -91,6 +91,7 @@ jobs:
           . /opt/esp/idf/export.sh
           idf.py set-target esp32s3
           idf.py build
+          python check_memory_layout.py build/music_controller.elf
       - name: Package firmware with checksums
         run: |
           set -euo pipefail

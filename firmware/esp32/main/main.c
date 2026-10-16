@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "esp_mac.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -42,6 +43,10 @@
 #error "Music Controller requires the PSRAM LVGL allocator; regenerate sdkconfig from defaults"
 #endif
 
+#if !CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY || !CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC
+#error "Music Controller requires external BSS and TLS allocation; regenerate sdkconfig from defaults"
+#endif
+
 static char ssid[33], password[65], token[129], url[192], preferred[129];
 static char player_id[129], player_name[96] = "No player", track[160] = "Waiting for Music Assistant",
             artist[160] = "", state[96] = "Starting...";
@@ -58,10 +63,10 @@ typedef struct {
     bool available;
     bool can_volume;
 } player_info_t;
-static player_info_t players[MAX_PLAYERS];
+static EXT_RAM_BSS_ATTR player_info_t players[MAX_PLAYERS];
 static size_t player_count;
 typedef struct { char id[96]; char name[96]; char icon_id[65]; bool selected; } music_provider_t;
-static music_provider_t music_providers[MAX_PROVIDERS];
+static EXT_RAM_BSS_ATTR music_provider_t music_providers[MAX_PROVIDERS];
 static size_t music_provider_count;
 static char selected_provider_ids[PROVIDER_SELECTION_SIZE];
 static bool provider_selection_saved;
@@ -73,7 +78,7 @@ typedef enum { VIEW_NOW_PLAYING, VIEW_PLAYERS, VIEW_PROVIDERS, VIEW_QUEUE, VIEW_
 typedef enum { ACT_SELECT, ACT_PLAY_STOP, ACT_PREVIOUS, ACT_NEXT, ACT_VOLUME_DOWN, ACT_VOLUME_UP, ACT_PROVIDER_TOGGLE, ACT_PROVIDER_SAVE, ACT_VOLUME_SET, ACT_SEEK, ACT_QUEUE_PLAY, ACT_BROWSE_PLAY } action_type_t;
 typedef struct { action_type_t type; char player_id[129]; bool selected; bool playing; int volume; int position; char queue_id[129], item_id[129], media_uri[513]; } action_t;
 static view_t active_view = VIEW_NOW_PLAYING;
-static controller_ui_t ui;
+static EXT_RAM_BSS_ATTR controller_ui_t ui;
 static lv_obj_t *now_screen;
 static lv_obj_t *players_list, *providers_list, *provider_save_status;
 static volatile bool players_dirty = true;
@@ -96,7 +101,7 @@ static bool backdrop_clear;
 static unsigned backdrop_generation, backdrop_result_generation;
 static unsigned char *art_result;
 static char art_result_id[65];
-static ui_queue_item_t queue_items[UI_QUEUE_PAGE_SIZE];
+static EXT_RAM_BSS_ATTR ui_queue_item_t queue_items[UI_QUEUE_PAGE_SIZE];
 static unsigned queue_count;
 static int queue_offset, queue_total, current_queue_index;
 static bool queue_loading, queue_requested, queue_dirty=true;
@@ -113,9 +118,9 @@ enum { BROWSE_ROOT, BROWSE_SOURCE, BROWSE_ALBUMS, BROWSE_ARTISTS, BROWSE_PLAYLIS
        BROWSE_ARTIST_ALBUMS, BROWSE_ALBUM_TRACKS, BROWSE_PLAYLIST_TRACKS, BROWSE_FOLDERS };
 static const char *browse_kind_names[]={"root","source","albums","artists","playlists","artist_albums","album_tracks","playlist_tracks","folders"};
 typedef struct { int kind, offset; char id[129],provider[96],source[96],title[160],uri[513]; } browse_context_t;
-static browse_context_t browse_stack[8];
+static EXT_RAM_BSS_ATTR browse_context_t browse_stack[8];
 static unsigned browse_depth, browse_generation, browse_count;
-static ui_media_item_t browse_items[UI_QUEUE_PAGE_SIZE];
+static EXT_RAM_BSS_ATTR ui_media_item_t browse_items[UI_QUEUE_PAGE_SIZE];
 static bool browse_requested, browse_loading, browse_dirty=true, browse_more;
 static char browse_request_id[24], browse_message[96]="Choose a music source";
 static unsigned browse_request_generation;
@@ -131,7 +136,7 @@ static void browse_changed(void) {
     browse_request_id[0]=0; browse_requested=true; browse_dirty=true;
 }
 static const char *search_kind_names[]={"tracks","albums","artists","playlists"};
-static ui_media_item_t search_items[UI_QUEUE_PAGE_SIZE];
+static EXT_RAM_BSS_ATTR ui_media_item_t search_items[UI_QUEUE_PAGE_SIZE];
 static unsigned search_count,search_generation,search_request_generation,search_kind;
 static bool search_loading,search_requested,search_dirty=true,browse_from_search;
 static char search_query[193],search_request_id[24],search_request_provider[96];
@@ -172,6 +177,15 @@ static bool ready;
 static volatile bool ip_ready;
 static unsigned request_id;
 static const char *TAG = "controller";
+static void log_memory(const char *stage) {
+    const uint32_t internal=MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const uint32_t dma=MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG,"Memory %s: internal_free=%u internal_largest=%u dma_largest=%u psram_free=%u bytes",
+        stage,(unsigned)heap_caps_get_free_size(internal),
+        (unsigned)heap_caps_get_largest_free_block(internal),
+        (unsigned)heap_caps_get_largest_free_block(dma),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
 static volatile bool screen_dirty = true;
 static volatile bool refresh_pending;
 static volatile bool ws_connected;
@@ -961,6 +975,7 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t event_id, void *e
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
         reset_ws_message();
         ESP_LOGE(TAG, "WebSocket error; inspect transport_ws status");
+        log_memory("WebSocket error");
         status("WebSocket error");
     } else if (event_id == WEBSOCKET_EVENT_DATA && ev) {
         ESP_LOGI(TAG, "WS frame: opcode=%d offset=%d length=%d total=%d",
@@ -1621,6 +1636,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
     log_main_stack("network init");
+    log_memory("network init");
     controller_loop();
 }
 
@@ -1635,6 +1651,7 @@ static void __attribute__((noinline)) controller_loop(void) {
         if (ip_ready && !started) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
                 status("Clock synced; connecting...");
+                log_memory("before WSS");
                 ESP_LOGI(TAG, "Starting WSS connection");
                 esp_websocket_client_start(socket_handle);
                 started = true;
@@ -1705,6 +1722,7 @@ static void __attribute__((noinline)) controller_loop(void) {
             ESP_LOGI(TAG, "Heartbeat: ip=%d ws=%d gateway=%d view=%d",
                      (int)ip_ready, (int)ws_connected, (int)ready, (int)active_view);
             log_main_stack("runtime");
+            log_memory("runtime");
             last_heartbeat = now;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
