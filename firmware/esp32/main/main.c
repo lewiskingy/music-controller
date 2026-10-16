@@ -458,9 +458,14 @@ static void players_received(const cJSON *array) {
 }
 
 static bool provider_is_selected(const char *id) {
-    if (!provider_selection_saved) return false;
+    if (!provider_selection_saved || !id || !id[0]) return false;
     char needle[100];
-    snprintf(needle, sizeof(needle), "|%s|", id);
+    size_t length = strnlen(id, sizeof(needle)-2);
+    if (length > sizeof(needle)-3) return false;
+    needle[0] = '|';
+    memcpy(needle+1, id, length);
+    needle[length+1] = '|';
+    needle[length+2] = '\0';
     return strstr(selected_provider_ids, needle) != NULL;
 }
 static void save_music_providers(void) {
