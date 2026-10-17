@@ -42,6 +42,10 @@ def main(argv=None):
                 "device_token": getpass.getpass("Existing gateway key (blank generates a new key): ").strip() or core.new_key(),
                 "player_id": input("Player ID (optional): ").strip(),
             }
+            sleep_answer = input("Enable Wi-Fi modem sleep to save power? [y/N]: ").strip().lower()
+            if sleep_answer not in ("", "n", "no", "y", "yes"):
+                raise core.SetupError("Wi-Fi sleep must be yes or no.")
+            settings["wifi_sleep"] = sleep_answer in ("y", "yes")
             core.validate_settings(settings)
             if args.export_gateway:
                 core.export_gateway_key(settings["device_token"], args.export_gateway)
