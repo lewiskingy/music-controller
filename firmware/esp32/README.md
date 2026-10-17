@@ -667,3 +667,37 @@ progress advances; timeout and first-touch wake. Look for blank flashes, partial
 frames, tearing or panel jitter. Native tests validate UI behavior, not physical
 VSYNC timing or RGB DMA bandwidth. Continued flicker needs a short video and
 serial logs to distinguish UI invalidation from panel/DMA or power problems.
+
+### Larger touch controls and punctuation
+
+The transport dock contains only Previous, Play/Stop and Next, each occupying
+one third of its full 480 × 136 area with 48px symbols. Track details and album
+art remain in Playing. The redundant thumbnail buffer has been removed.
+The volume strip is 96px wide; its full-width + and - buttons each occupy one
+fifth of the strip height (106px), with 48px solid-stroke symbols. The vertical slider and
+percentage remain between them. Browse and Search still hide volume and use
+all 480px of content width.
+
+The 18px and 24px text fonts render common Unicode curly apostrophes/quotes,
+primes, dashes and non-breaking spaces using matching stock punctuation glyphs.
+This is a display fallback; stored metadata and UTF-8 search queries are unchanged.
+The existing £ search glyph remains available. This does not add general Unicode
+alphabet coverage. Local builds must enable `CONFIG_LV_FONT_MONTSERRAT_48=y`
+(or regenerate sdkconfig from defaults). Flash the application at `0x20000` to
+retain provisioning and preferences. No gateway update or Atlas pin change is
+required.
+
+Battery percentage remains unavailable on the unmodified supported 4.3-inch
+board. Its [published schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-S3-Touch-LCD-4.3-Sch.pdf)
+shows VBAT connected to the CS8501 power circuit, with CHRG/STDBY driving LEDs,
+not ESP32 inputs. The Sensor AD header is an external ADC input, not a wired
+battery monitor. A reliable battery indicator needs additional sensing hardware,
+such as a compatible I²C fuel gauge; no percentage or charging state is inferred
+from screen-power mode or USB enumeration. The provider shortcut remains until
+real battery telemetry is available.
+
+Physical acceptance: verify large button edge taps, stop/play/skip and volume
+stepping on the chosen output; slider dragging; normal and disabled contrast;
+Playing/Queue/Settings fit; Browse/Search full width; and a title such as
+“Don’t You Remember” without a missing-glyph box. Native acceptance checks layout,
+action targets, glyph resolution and artwork handling, not physical touch comfort.

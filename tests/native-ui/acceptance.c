@@ -120,11 +120,27 @@ static void geometry(void) {
         lv_obj_t *list=pane==ui.browse_content?ui.browse_list:ui.search_list;
         CHECK(lv_obj_get_width(list)==432);
     }
-    CHECK(volume.x1==400 && volume.y1==64 && volume.x2==479 && volume.y2==595);
+    CHECK(volume.x1==384 && volume.y1==64 && volume.x2==479 && volume.y2==595);
     lv_area_t previous=bounds(ui.transport[0]), play=bounds(ui.transport[1]), next=bounds(ui.transport[2]);
-    CHECK(previous.x2 < play.x1 && play.x2 < next.x1);
-    CHECK(lv_obj_get_width(ui.volume_up)>=48 && lv_obj_get_height(ui.volume_up)>=48);
-    CHECK(lv_obj_get_width(ui.volume_down)>=48 && lv_obj_get_height(ui.volume_down)>=48);
+    CHECK(previous.x2+1==play.x1 && play.x2+1==next.x1);
+    CHECK(lv_obj_get_child_cnt(lv_obj_get_parent(ui.transport[0]))==3);
+    for(unsigned i=0;i<3;i++) {
+        lv_area_t area=bounds(ui.transport[i]);
+        CHECK(area.x1==(int)i*160 && area.x2==(int)(i+1)*160-1);
+        CHECK(area.y1==dock.y1 && area.y2==dock.y2);
+        lv_obj_t *symbol=lv_obj_get_child(ui.transport[i],0);
+        CHECK(lv_obj_get_style_text_font(symbol,LV_PART_MAIN)==&lv_font_montserrat_48);
+        fixed_caption(symbol);
+    }
+    lv_obj_t *volume_buttons[]={ui.volume_up,ui.volume_down};
+    for(unsigned i=0;i<2;i++) {
+        lv_area_t area=bounds(volume_buttons[i]);
+        CHECK(area.x1==volume.x1 && area.x2==volume.x2);
+        CHECK(lv_obj_get_height(volume_buttons[i])==UI_CONTENT_HEIGHT/5);
+        CHECK(lv_obj_get_style_text_font(volume_buttons[i],LV_PART_MAIN)==&lv_font_montserrat_48);
+        fixed_caption(lv_obj_get_child(volume_buttons[i],0));
+    }
+    CHECK(bounds(ui.volume_up).y1==volume.y1 && bounds(ui.volume_down).y2==volume.y2);
     CHECK(!lv_obj_has_flag(ui.root,LV_OBJ_FLAG_SCROLLABLE));
     const char *tabs[]={"Playing","Queue","Browse","Search"};
     for(unsigned i=0;i<4;i++) {
@@ -172,6 +188,23 @@ int main(int argc,char **argv) {
         .can_volume=true,.can_seek=true,.can_queue=true,.can_browse=true,.can_search=true};
     controller_ui_provider_badges(&ui,icon_ids[0],icon_ids[2]);
     controller_ui_update(&ui,&state); screenshot("01-now-playing"); geometry();
+    const char *original_track=state.track;
+    state.track="Don’t You Remember";
+    state.artist="‘Adele’ – Live";
+    state.album="“21”";
+    controller_ui_update(&ui,&state);
+    CHECK(!strcmp(lv_label_get_text(ui.title),state.track));
+    lv_obj_t *labels[]={ui.title,ui.artist,ui.album,ui.search_input};
+    const uint32_t punctuation[]={0x2018,0x2019,0x201c,0x201d,0x2013,0x2014,0x00a0,0x02bc};
+    for(unsigned i=0;i<4;i++) for(unsigned j=0;j<sizeof(punctuation)/sizeof(punctuation[0]);j++) {
+        lv_font_glyph_dsc_t glyph;
+        CHECK(lv_font_get_glyph_dsc(lv_obj_get_style_text_font(labels[i],LV_PART_MAIN),&glyph,punctuation[j],'A'));
+        CHECK(!glyph.is_placeholder && glyph.resolved_font);
+        if(glyph.box_w) CHECK(lv_font_get_glyph_bitmap(glyph.resolved_font,punctuation[j])!=NULL);
+    }
+    screenshot("01b-unicode-punctuation"); geometry();
+    state.track=original_track; state.artist="Adele"; state.album="19";
+    controller_ui_update(&ui,&state);
     /* Identical gateway snapshots must not invalidate static track labels. */
     advance(500);
     lv_obj_add_event_cb(ui.title,title_drawn,LV_EVENT_DRAW_MAIN,NULL);
@@ -260,7 +293,7 @@ int main(int argc,char **argv) {
     }
     state.art_id="mock-album"; controller_ui_update(&ui,&state); controller_ui_show(&ui,UI_PLAYING);
     CHECK(controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2));
-    CHECK(ui.art_loaded && !lv_obj_has_flag(ui.thumbnail_image,LV_OBJ_FLAG_HIDDEN));
+    CHECK(ui.art_loaded && !lv_obj_has_flag(ui.art_image,LV_OBJ_FLAG_HIDDEN));
     screenshot("11-album-art"); geometry();
     CHECK(!controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2-1));
     album_packet[0]='X'; CHECK(!controller_ui_set_artwork(&ui,state.art_id,album_packet,8+288*288*2)); album_packet[0]='M';
