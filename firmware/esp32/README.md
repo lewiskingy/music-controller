@@ -636,15 +636,44 @@ Connection and heartbeat logs show internal free bytes, largest internal/DMA
 blocks, and free PSRAM. Verify successful `gateway/ready` and repeat with artwork,
 provider icon requests on the physical board.
 
-### Buffered presentation and startup backlight
+### Buffered presentation and startup loading page
 
-All drawing uses LVGL and the pinned BSP's **anti-tearing mode 3 (direct mode)**,
-with 90-degree rotation. The rotated path uses one full logical drawing buffer
-and two RGB panel buffers in PSRAM (three 768,000-byte buffers, about 2.20 MiB).
-The BSP rotates/copies completed dirty regions into the secondary panel buffer,
-presents it at VSYNC and synchronizes the other panel buffer for later updates.
-This was already selected in defaults; firmware now rejects stale configurations
-that disable it or select another mode/rotation.
+The pinned BSP allocates one full logical drawing buffer and two RGB panel buffers
+in PSRAM (three 768,000-byte buffers, about 2.20 MiB), with portrait rotation and
+anti-tearing mode 3. `controller_display.c` replaces its rotated LVGL flush and RGB
+completion callback after BSP initialization; hardware pins, touch rotation and
+the LVGL task remain provided by BSP 1.0.7. No managed component is modified.
+
+The adapter rotates dirty rectangles in 16×16 tiles. Both external-memory reads
+and writes are contiguous within each tile, rather than scattering each pixel
+across PSRAM cache lines. It submits only after LVGL's last dirty area, then waits
+for safe retirement before copying the changed native rows into the old buffer.
+The logical canvas is never submitted as a landscape panel buffer.
+
+IDF 5.4.2's bounce-frame callback reports when a complete source frame has been
+copied to DMA, not which framebuffer was selected. A callback already in flight
+on the other core can arrive around submission. The adapter drains notifications
+**after** submission and waits for two subsequent completion events before
+reusing the old buffer. It accepts the additional latency (up to roughly two
+panel periods in normal operation) to avoid writing pixels still being consumed.
+Each wait has a one-second timeout that fails explicitly rather than silently
+reusing an unsafe buffer. Sparse control updates still render only dirty regions.
+
+The panel clock is requested at 12 MHz instead of the BSP's 14 MHz; nominal refresh
+is about 29 Hz with the BSP porch timings (the divider may round the clock). Two
+20-line internal DMA bounce buffers use about 62.5 KiB total, 31.25 KiB more than
+the previous 10-line default. The data-cache line is 64 bytes, compiler optimization
+is performance (-O2), and instructions execute and read-only data is read from PSRAM so NVS
+writes do not disable the display's external-memory cache. PSRAM instruction/data
+placement costs additional external RAM; the firmware retains the 64 KiB internal
+allocation reserve. Stale configuration fails compilation: regenerate sdkconfig
+from defaults, or apply all new settings before rebuilding.
+
+This follows ESP-IDF's [RGB bandwidth/cache guidance](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-reference/peripherals/lcd/rgb_lcd.html#bounce-buffer-with-single-psram-frame-buffer).
+The physical symptom was a vertically shifted/repeated image during navigation,
+which is consistent with scanout starvation. Buffer ownership and retirement are
+also hardened; physical testing is needed to establish whether all observed
+flicker is eliminated. No unconditional per-VSYNC restart workaround is enabled.
 
 Rendering rules for future changes:
 
@@ -655,29 +684,42 @@ Rendering rules for future changes:
   the same buffered presentation path. Dirty-region rendering avoids repainting
   unrelated artwork; it does not permit writes into the active panel buffer.
 - Do not clear the visible panel, draw directly with panel APIs, or manually swap
-  buffers from UI code. The BSP owns rotation, buffer synchronization and VSYNC.
-- Do not force intermediate refreshes during a transition. In particular,
-  `lv_refr_now` must run on the BSP LVGL task: its flush waits for that task's
-  VSYNC notification. A mutex alone does not make another task suitable.
-- Skip unchanged text updates. Network/metadata ticks must not repeatedly
-  invalidate static labels. Download assets outside UI locks and apply complete,
+  buffers from UI code. The adapter owns rotation, synchronization and retirement.
+- Do not force intermediate refreshes during a transition. Keep `lv_refr_now` on
+  the BSP LVGL task; the upstream BSP's flush relies on task-specific notifications.
+- Skip unchanged text updates. Download assets outside UI locks and apply complete,
   validated assets inside one transaction.
 
-Startup first presents a minimal “Loading...” page using a one-shot LVGL timer,
-then enables the backlight. The application waits for that presentation before
-building the main UI, saved theme and initial state in one locked transaction.
-The loading frame stays visible until the BSP presents the completed main frame.
-This does not wait for Wi-Fi, the gateway or artwork. Later transitions retain
-the previous frame rather than inserting a loading page. The board's hardware
-reset sequence can still cause a flash before software backlight control exists.
+Startup presents the bundled Loading splash before building the main UI and saved
+appearance in one locked transaction. The loading frame stays visible until the
+completed main frame is presented. It does not wait for Wi-Fi, gateway or artwork.
+Later transitions retain the previous frame instead of inserting a loading page.
 
-Hardware acceptance: cold boot and reset with/without provisioning or network;
-rapid navigation through every view and Screen power; keyboard/results, changing
-tracks/albums, provider icons; idle with playback stopped and while
-progress advances; timeout and first-touch wake. Look for blank flashes, partial
-frames, tearing or panel jitter. Native tests validate UI behavior, not physical
-VSYNC timing or RGB DMA bandwidth. Continued flicker needs a short video and
-serial logs to distinguish UI invalidation from panel/DMA or power problems.
+WebSocket Ping/Pong control frames bypass the JSON assembler and do not discard a
+partial message. Individual fragment logs use DEBUG rather than INFO; assembled
+message sizes and response summaries remain visible.
+
+### Display-fix validation and flashing
+
+`tests/test_esp32_display.py` compiles the actual adapter with a simulated RGB
+peripheral. It checks 203 full/incremental frames, tile edges, multiple dirty
+regions, damage-list overflow and completion interrupts on either side of buffer
+submission. Every frame checks that neither undamaged pixels nor the buffer
+still feeding scanout is overwritten. CI also runs the existing native UI suite,
+ESP-IDF compilation and ELF memory-layout verification. These checks do not prove
+physical VSYNC timing, CPU/cache bandwidth or board power behavior.
+
+For an already provisioned board flash the new **application** at `0x20000`, as in
+the startup-fix instructions above. Do not erase flash or replace NVS. No gateway
+update or Atlas deployment is required.
+
+For physical acceptance repeat the recorded Playing → Queue transition and cycle
+Browse, Search/keyboard, Settings and Screen power. Test cold boot, idle, playback,
+track/artwork changes, boot/pre-sleep splash, network reconnect and timeout/first-touch wake.
+Capture serial output from boot: `controller-display` reports clock request,
+bounce lines, retirement events, presented frames and the longest flush duration;
+existing logs report stack and internal/DMA/PSRAM headroom. Check that frames
+advance without shifted/repeated regions and controls remain acceptably responsive.
 
 ### Larger touch controls and punctuation
 
@@ -712,3 +754,16 @@ stepping on the chosen output; slider dragging; normal and disabled contrast;
 Playing/Queue/Settings fit; Browse/Search full width; and a title such as
 “Don’t You Remember” without a missing-glyph box. Native acceptance checks layout,
 action targets, glyph resolution and artwork handling, not physical touch comfort.
+
+### Release integration of the scanout fix
+
+The physically verified scanout fix in PR #30 was not included in `v0.4.2`: that
+release was made from main while #30 remained unmerged. The fix is now integrated
+with the larger controls and bundled boot/pre-sleep splash. Both ordinary widget
+updates and the splash use `controller_display.c`; do not ship builds that omit
+its initialization, CMake source registration or sdkconfig scanout settings.
+
+Boot logs must include `controller-display: Buffered portrait scanout:` with
+`pclk=12000000 bounce_lines=20 retire_events=2`. This identifies the active adapter,
+not just LVGL anti-tearing defaults. Merge the fix before creating the next
+firmware release tag; the gateway does not need updating for this firmware fix.
