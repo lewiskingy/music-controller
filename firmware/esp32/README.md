@@ -111,8 +111,9 @@ and defaults to No. For a manually maintained NVS CSV, the opt-in row is:
 wifi_sleep,data,u8,1
 ```
 
-The packaged installer leaves this optional key absent, giving the same awake
-default. Existing NVS images need no changes for the new default: install an
+The Windows installer offers an unchecked **Enable Wi-Fi sleep** checkbox during
+new-device setup; CLI provisioning offers the same opt-in. Both write this key
+as 0 or 1. Normal updates preserve the stored setting. Existing NVS images need no changes for the new default: install an
 application-only firmware update to preserve credentials and preferences. Only
 regenerate/flash a private NVS image if deliberately changing provisioning;
 replacing NVS also replaces its other saved settings.

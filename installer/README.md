@@ -18,6 +18,22 @@ New-device setup erases **all** flash, including existing settings and storage. 
 
 Only releases with `release-manifest.json` appear in the picker. Older firmware-only/prototype releases and historical `gateway-v…` releases are not compatible. Release v0.5.0 supplies the executable and manifest; use a compatible stable release.
 
+## Optional Wi-Fi sleep
+
+New-device setup includes **Enable Wi-Fi sleep**, unchecked by default. Leave it
+unchecked to keep Wi-Fi awake on battery and USB, including when the screen is
+off. Checking it saves power by enabling modem sleep, which should retain the
+connection but may add latency. The CLI provisioning flow asks the same question
+and defaults to No.
+
+Setup writes `controller/wifi_sleep` as NVS `u8`: `0` disables sleep and `1`
+enables it. Firmware reads this at boot. This option requires firmware containing
+PR #35; older firmware ignores it. The checkbox applies only to **Set up new
+device**, including prepare-only packages. **Update existing device** preserves
+the stored setting and ignores the setup fields. Changing this option through
+new-device setup erases all device data, so do not reprovision just to obtain
+the new awake default: an ordinary firmware update uses it when the key is absent.
+
 ## Gateway key
 
 For an existing gateway, reuse its `CONTROLLER_DEVICE_TOKEN`; normal firmware updates leave it unchanged. For a new gateway, select **Generate new gateway key**, then copy it or explicitly export the matching environment setting. The key is shared by the current gateway implementation: changing it requires reprovisioning other devices using that gateway.

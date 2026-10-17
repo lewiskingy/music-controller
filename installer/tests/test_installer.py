@@ -153,12 +153,13 @@ def test_flash_tool_failure_is_actionable(package):
         core.flash(profile, path, "COM4")
 
 
-def test_prepare_only_keeps_private_files_without_flashing(tmp_path, package):
+@pytest.mark.parametrize("sleep_answer", ["", "yes", "no"])
+def test_prepare_only_keeps_private_files_without_flashing(tmp_path, package, sleep_answer):
     from music_controller_setup.cli import main
     path, profile = package
     selected = dict(tag_name="v0.5.0")
     destination = tmp_path / "prepared"
-    answers = iter(["Home WiFi", "wss://example.net/ws", ""])
+    answers = iter(["Home WiFi", "wss://example.net/ws", "", sleep_answer])
     secrets = iter(["password", "existing-key"])
     with patch.object(core, "release", return_value=selected), patch.object(core, "manifest", return_value=dict(profiles=[profile])), patch.object(core, "prepare"), patch.object(core, "flash") as flashing, patch("builtins.input", side_effect=lambda _: next(answers)), patch("getpass.getpass", side_effect=lambda _: next(secrets)):
         main(["provision", "--prepare-only", "--keep-files", str(destination)])
@@ -202,6 +203,28 @@ def test_windows_gui_initialization(package):
             assert app.port.get().startswith("COM4")
             assert app.mode.get() == "Update existing device"
             assert app.status.get().startswith("Ready")
-            assert root.winfo_reqheight() <= 700
+            assert app.settings["wifi_sleep"].get() is False
+            assert root.winfo_reqheight() <= 740
     finally:
         root.destroy()
+
+
+@pytest.mark.parametrize("setting, expected", [(None, 0), (False, 0), (True, 1)])
+def test_wifi_sleep_nvs_value(package, setting, expected):
+    path, profile = package
+    settings = dict(wifi_ssid="wifi", device_token="key", gateway_url="wss://example.net/ws")
+    if setting is not None:
+        settings["wifi_sleep"] = setting
+    core.provision(settings, profile, path)
+    data = (path / "controller-nvs.bin").read_bytes()
+    # NVS entries are 32 bytes: type at byte 1, key at 8, inline u8 at 24.
+    entries = [data[i:i + 32] for i in range(0, len(data), 32)]
+    entry, = [e for e in entries if e[8:24].rstrip(b"\0") == b"wifi_sleep"]
+    assert entry[1] == 0x01
+    assert entry[24] == expected
+
+
+@pytest.mark.parametrize("value", ["yes", "0", 1, None])
+def test_wifi_sleep_rejects_non_boolean(value):
+    with pytest.raises(core.SetupError, match="Wi-Fi sleep"):
+        core.validate_settings(dict(wifi_sleep=value))

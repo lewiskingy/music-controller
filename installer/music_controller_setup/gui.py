@@ -17,8 +17,8 @@ class Installer:
         self.data = None
         self.available = []
         root.title("Music Controller Setup")
-        root.geometry("720x700")
-        root.minsize(680, 680)
+        root.geometry("720x740")
+        root.minsize(680, 740)
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
@@ -49,6 +49,14 @@ class Installer:
             entry.grid(row=index, column=1, sticky="ew", pady=5)
             self.settings[key] = variable
             self.controls.append(entry)
+        self.settings["wifi_sleep"] = tk.BooleanVar(value=False)
+        wifi_sleep = ttk.Checkbutton(
+            form, text="Enable Wi-Fi sleep (saves battery; may add latency)",
+            variable=self.settings["wifi_sleep"])
+        wifi_sleep.grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
+        self.controls.append(wifi_sleep)
+        ttk.Label(form, text="Setup only. Update preserves the device’s existing settings.").grid(
+            row=6, column=0, columnspan=2, sticky="w")
         row = ttk.Frame(frame)
         row.pack(fill="x")
         self.button(row, "Generate new gateway key", lambda: self.settings["device_token"].set(core.new_key()))

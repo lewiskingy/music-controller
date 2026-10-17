@@ -114,6 +114,8 @@ def prepare(selected, profile, destination, log=print):
 
 
 def validate_settings(settings):
+    if type(settings.get("wifi_sleep", False)) is not bool:
+        raise SetupError("Wi-Fi sleep must be enabled or disabled")
     limits = {"wifi_ssid": 32, "wifi_pass": 64, "gateway_url": 191, "device_token": 128, "player_id": 128}
     for key, limit in limits.items():
         value = settings.get(key, "")
@@ -140,6 +142,7 @@ def provision(settings, profile, destination):
             writer = csv.writer(stream)
             writer.writerow(["key", "type", "encoding", "value"])
             writer.writerow(["controller", "namespace", "", ""])
+            writer.writerow(["wifi_sleep", "data", "u8", int(settings.get("wifi_sleep", False))])
             for key in ("wifi_ssid", "wifi_pass", "gateway_url", "device_token", "player_id"):
                 if settings.get(key):
                     writer.writerow([key, "data", "string", settings[key]])
