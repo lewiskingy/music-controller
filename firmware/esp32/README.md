@@ -414,19 +414,11 @@ Native acceptance checks all twelve theme selections and their persistence callb
 
 ### Gateway-served album artwork
 
-The companion Atlas gateway advertises `artwork_rgb565` and annotates current queue items with `controller_art_id`. Firmware fetches `/device/artwork/{id}` from the same provisioned gateway using the existing device token in a dedicated worker. A complete validated MCAR packet contains a 288 × 288 little-endian RGB565 cover. PSRAM holds the transfer and reusable display buffers; the 40 × 40 dock thumbnail is derived locally. Downloads never hold LVGL locks. Results are discarded after a player, queue, track or artwork change. Same-album artwork is reused. Artwork retains its original colours under every theme.
+The companion Atlas gateway advertises `artwork_rgb565` and annotates current queue items with `controller_art_id`. Firmware fetches `/device/artwork/{id}` from the same provisioned gateway using the existing device token in a dedicated worker. A complete validated MCAR packet contains a 288 × 288 little-endian RGB565 cover. PSRAM holds the transfer and reusable album-art display buffer. Downloads never hold LVGL locks. Results are discarded after a player, queue, track or artwork change. Same-album artwork is reused. Artwork retains its original colours under every theme.
 
 The gateway supplies a generic record cover for absent or failed provider art. An unreachable/older gateway leaves the local placeholder visible, without affecting playback controls. Companion changes are in Atlas PR #614.
 
-Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks both artwork slots, malformed/truncated packets, stale responses and artwork changes; functional screenshots include real-cover fixtures and generic covers.
-
-The single backdrop fixture is `tests/native-ui/fixtures/halloween-480x800.png`
-(exactly 480 × 800). It replaces the synthetic striped background in
-`backdrop-playing`, `backdrop-settings` and `backdrop-light-settings` captures.
-The fixture generator uses the production gateway's normalization, default 35%
-brightness and RGB565 packet encoding. Other captures keep their ordinary colour
-theme. The PNG can also be uploaded at `/backdrop` for manual testing; it is not
-installed or enabled automatically on deployed controllers.
+Native acceptance mocks gateway packets using `tests/native-ui/mock_artwork.py`, then passes that fixture directory as a second argument to `ui_acceptance`. It checks artwork, malformed/truncated packets, stale responses and artwork changes; functional screenshots include real-cover fixtures and generic covers.
 
 ### Queue
 
@@ -466,17 +458,36 @@ Browse and Search hide the right VolumeDock and expand their content panes to 48
 
 The full-width default map contains lowercase letters only, plus Symbols, Space, Backspace and Search. Symbols switches to digits 0–9 and £ $ # & apostrophe, hyphen, period, comma, slash, ! ? parentheses, + @ and colon; Letters returns to the alphabet without losing text. No case toggles or cursor-arrow keys are shown. Reopening the keyboard starts with letters. The gateway applies Unicode casefold to submitted queries and to the older-server library fallback, retaining punctuation. The stock font is supplemented with an original pound-sign glyph so £ renders in both the keyboard and input. Acceptance covers symbol entry, UTF-8 backspace, mode switching, Search submission and case-normalized gateway requests; screenshots total 46.
 
-### Gateway backdrop
+### Offline boot and sleep image
 
-Settings includes a separate **Backdrop: off / gateway** toggle, persisted in NVS
-and off by default. Upload at the gateway's `/backdrop` page (or
-`/controller/backdrop` through Caddy). The 480 × 800 RGB565 image is downloaded by
-a dedicated worker every 15 seconds with conditional ETag requests; UI and state
-locks are never held during transfer. The decoded image remains in PSRAM during
-network interruptions and is cleared when disabled or removed. This uses roughly
-768 KiB for the retained pixels plus a temporary 768 KiB transfer buffer. Plain
-colour themes remain independent; opaque control cards and translucent palette
-backgrounds keep labels legible. The gateway prepares cropping and brightness.
+The original Halloween PNG is bundled in `assets/halloween.png` and compiled into
+firmware, so it works immediately without Wi-Fi, gateway access or provisioning.
+A full-screen top-layer splash with “Loading...” is presented before enabling
+the backlight. It covers initial interface creation and is removed in the same
+LVGL transaction that completes the initial UI. It does not wait for a network
+connection and never stays behind the normal colour theme.
+
+On the configured inactivity timeout, the same image covers the interface for
+at least two seconds, measured after its frame has been presented. Then the
+backlight turns off. Touch during those two seconds cancels sleep and consumes
+the entire gesture; waking from backlight-off also consumes the first gesture.
+Saving power preferences cancels an in-progress sleep splash and resets timing.
+There is no blocking two-second delay; networking and UI timers continue.
+
+The optional background feature has been removed: no Settings toggle, image
+polling worker, upload page or gateway image routes. Legacy `ui_backdrop` NVS
+values and gateway image-state files are ignored; no NVS reset is needed. Plain
+palette and Light/Dark choices remain. Existing gateways work with this firmware;
+a gateway release is only needed to remove the obsolete upload endpoints.
+
+PNG decoding uses the existing PSRAM allocator; decoded pixels and decoder
+scratch allocations exist only while the splash is displayed and are released
+when it is removed. The embedded PNG adds about 405 KiB to the application;
+there is no recurring image download or persistent background pixel buffer.
+Local builds require `CONFIG_LV_USE_PNG=y` (or regenerate defaults). Native
+acceptance renders boot/sleep and post-splash screens; physical acceptance must
+check cold/offline boot, the two-second dwell, sleep cancellation, wake gesture
+suppression and memory headroom.
 
 ### Display power saving
 
@@ -623,7 +634,7 @@ and `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`, and set
 `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536`, or regenerate sdkconfig.
 Connection and heartbeat logs show internal free bytes, largest internal/DMA
 blocks, and free PSRAM. Verify successful `gateway/ready` and repeat with artwork,
-provider icons and backdrop requests on the physical board.
+provider icon requests on the physical board.
 
 ### Buffered presentation and startup loading page
 
@@ -679,7 +690,7 @@ Rendering rules for future changes:
 - Skip unchanged text updates. Download assets outside UI locks and apply complete,
   validated assets inside one transaction.
 
-Startup presents a minimal Loading page before building the main UI and saved
+Startup presents the bundled Loading splash before building the main UI and saved
 appearance in one locked transaction. The loading frame stays visible until the
 completed main frame is presented. It does not wait for Wi-Fi, gateway or artwork.
 Later transitions retain the previous frame instead of inserting a loading page.
@@ -704,8 +715,55 @@ update or Atlas deployment is required.
 
 For physical acceptance repeat the recorded Playing → Queue transition and cycle
 Browse, Search/keyboard, Settings and Screen power. Test cold boot, idle, playback,
-track/artwork/backdrop changes, network reconnect and timeout/first-touch wake.
+track/artwork changes, boot/pre-sleep splash, network reconnect and timeout/first-touch wake.
 Capture serial output from boot: `controller-display` reports clock request,
 bounce lines, retirement events, presented frames and the longest flush duration;
 existing logs report stack and internal/DMA/PSRAM headroom. Check that frames
 advance without shifted/repeated regions and controls remain acceptably responsive.
+
+### Larger touch controls and punctuation
+
+The transport dock contains only Previous, Play/Stop and Next, each occupying
+one third of its full 480 × 136 area with 48px symbols. Track details and album
+art remain in Playing. The redundant thumbnail buffer has been removed.
+The volume strip is 96px wide; its full-width + and - buttons each occupy one
+fifth of the strip height (106px), with 48px solid-stroke symbols. The vertical slider and
+percentage remain between them. Browse and Search still hide volume and use
+all 480px of content width.
+
+The 18px and 24px text fonts render common Unicode curly apostrophes/quotes,
+primes, dashes and non-breaking spaces using matching stock punctuation glyphs.
+This is a display fallback; stored metadata and UTF-8 search queries are unchanged.
+The existing £ search glyph remains available. This does not add general Unicode
+alphabet coverage. Local builds must enable `CONFIG_LV_FONT_MONTSERRAT_48=y`
+(or regenerate sdkconfig from defaults). Flash the application at `0x20000` to
+retain provisioning and preferences. No gateway update or Atlas pin change is
+required.
+
+Battery percentage remains unavailable on the unmodified supported 4.3-inch
+board. Its [published schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-S3-Touch-LCD-4.3-Sch.pdf)
+shows VBAT connected to the CS8501 power circuit, with CHRG/STDBY driving LEDs,
+not ESP32 inputs. The Sensor AD header is an external ADC input, not a wired
+battery monitor. A reliable battery indicator needs additional sensing hardware,
+such as a compatible I²C fuel gauge; no percentage or charging state is inferred
+from screen-power mode or USB enumeration. The provider shortcut remains until
+real battery telemetry is available.
+
+Physical acceptance: verify large button edge taps, stop/play/skip and volume
+stepping on the chosen output; slider dragging; normal and disabled contrast;
+Playing/Queue/Settings fit; Browse/Search full width; and a title such as
+“Don’t You Remember” without a missing-glyph box. Native acceptance checks layout,
+action targets, glyph resolution and artwork handling, not physical touch comfort.
+
+### Release integration of the scanout fix
+
+The physically verified scanout fix in PR #30 was not included in `v0.4.2`: that
+release was made from main while #30 remained unmerged. The fix is now integrated
+with the larger controls and bundled boot/pre-sleep splash. Both ordinary widget
+updates and the splash use `controller_display.c`; do not ship builds that omit
+its initialization, CMake source registration or sdkconfig scanout settings.
+
+Boot logs must include `controller-display: Buffered portrait scanout:` with
+`pclk=12000000 bounce_lines=20 retire_events=2`. This identifies the active adapter,
+not just LVGL anti-tearing defaults. Merge the fix before creating the next
+firmware release tag; the gateway does not need updating for this firmware fix.

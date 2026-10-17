@@ -33,7 +33,7 @@ before relying on driver behavior; do not assume newer documentation applies.
 - Keep forced refreshes on the BSP LVGL task. The upstream BSP flush waits
   for that task's notification; the installed adapter uses its own completion
   semaphore. Do not rely on upstream task-notification behavior in new code.
-- Keep a minimal Loading page visible while preparing the initial main frame.
+- Keep a bundled Loading splash visible while preparing the initial main frame.
   Later transitions retain the previous frame until the replacement is ready.
   Do not wait for network access or artwork before showing useful startup UI.
 
@@ -100,6 +100,11 @@ modeled DMA refill. Do not replace it with source-string assertions.
 
 Native acceptance cannot prove physical VSYNC, RGB DMA bandwidth, touch alignment,
 battery behavior or TLS memory headroom. Identify hardware checks still needed:
-cold boot, offline startup, navigation/dialogs, typing/search, track/artwork/backdrop
-changes, stopped/playing idle, sleep/wake and network reconnection. Keep physical
-acceptance claims separate from compilation and simulator results.
+cold boot, offline startup, navigation/dialogs, typing/search, track/artwork
+changes, boot/sleep splash, stopped/playing idle, sleep/wake and network
+reconnection. Keep physical acceptance claims separate from compilation and simulator results.
+
+Release integration: before tagging firmware, verify that tested display fixes
+are present in the release ancestry, the adapter is initialized before the
+boot splash, and the firmware build includes the required scanout settings.
+A successful PR artifact is not automatically part of a later main-branch release.

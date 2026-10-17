@@ -3,6 +3,7 @@
 #include <string.h>
 #include "controller_ui.h"
 #include "search_keyboard_font.h"
+#include "punctuation_font.h"
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #endif
@@ -87,11 +88,6 @@ static void theme_clicked(lv_event_t *event) {
     if(ui->theme_cb) ui->theme_cb(palette,light);
 }
 
-static void backdrop_clicked(lv_event_t *event) {
-    controller_ui_t *ui = lv_event_get_user_data(event);
-    controller_ui_enable_backdrop(ui, !ui->backdrop_enabled);
-    if (ui->backdrop_cb) ui->backdrop_cb(ui->backdrop_enabled);
-}
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned color) {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_set_pos(obj, x, y);
@@ -113,7 +109,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w,
     label_text(obj, text);
     lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
     fg(obj, color, 0);
-    if (large) lv_obj_set_style_text_font(obj, &lv_font_montserrat_24, 0);
+    if (large) lv_obj_set_style_text_font(obj, &punctuation_large_font, 0);
     return obj;
 }
 static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y, int w, int h,
@@ -347,6 +343,8 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->root = root;
     ui->action_cb = action_cb;
     controller_ui_set_theme(ui,0,false);
+    punctuation_fonts_init();
+    lv_obj_set_style_text_font(root, &punctuation_text_font, 0);
     bg(root, BG, 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     fg(root, TEXT, 0);
@@ -410,32 +408,45 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->save_button = button(ui->providers_content, "Save", 232, 434, 144, 56, save_cb, NULL);
     ui->provider_feedback = label(ui->providers_content, "Choose a provider, then Save", 24, 503, 352, MUTED, false);
     lv_obj_t *dock = panel(root, 0, UI_DOCK_Y, UI_WIDTH, UI_DOCK_HEIGHT, SURFACE);
-    lv_obj_t *thumbnail = panel(dock, 24, 12, 40, 40, ACTIVE);
-    ui->thumbnail = thumbnail;
-    ui->thumbnail_image = lv_img_create(thumbnail);
-    lv_obj_set_pos(ui->thumbnail_image,0,0);
-    lv_obj_add_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_radius(thumbnail, 6, 0);
-    lv_obj_set_style_clip_corner(thumbnail,true,0);
-    ui->mini_title = label(dock, "Nothing playing", 76, 12, 380, TEXT, false);
-    ui->mini_artist = label(dock, "", 76, 34, 380, MUTED, false);
-    ui->transport[0] = button(dock, LV_SYMBOL_PREV, 108, 68, 64, 56, dock_clicked, ui);
-    ui->transport[1] = button(dock, LV_SYMBOL_PLAY, 204, 60, 72, 72, dock_clicked, ui);
-    ui->transport[2] = button(dock, LV_SYMBOL_NEXT, 308, 68, 64, 56, dock_clicked, ui);
-    lv_obj_set_style_radius(ui->transport[1], 36, 0);
+    const char *symbols[] = {LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT};
+    for (unsigned i=0;i<3;i++) {
+        ui->transport[i] = button(dock, symbols[i], i*UI_WIDTH/3, 0,
+                                  UI_WIDTH/3, UI_DOCK_HEIGHT, dock_clicked, ui);
+        lv_obj_set_style_radius(ui->transport[i], 0, 0);
+        lv_obj_set_style_border_width(ui->transport[i], 0, 0);
+        lv_obj_set_style_pad_all(ui->transport[i], 0, 0);
+        lv_obj_set_style_text_font(ui->transport[i], &lv_font_montserrat_48, 0);
+    }
     bg(ui->transport[1], ACCENT, 0);
     fg(ui->transport[1], BG, 0);
     ui->transport_text = lv_obj_get_child(ui->transport[1], 0);
     lv_obj_t *volume_dock = panel(root, UI_VOLUME_X, UI_HEADER_HEIGHT,
                                   UI_VOLUME_WIDTH, UI_CONTENT_HEIGHT, SURFACE);
-    ui->volume_heading = label(volume_dock, "Vol", 8, 20, 64, MUTED, false);
+    ui->volume_heading = label(volume_dock, "Vol", 8, 116, UI_VOLUME_WIDTH-16, MUTED, false);
     lv_obj_set_style_text_align(ui->volume_heading, LV_TEXT_ALIGN_CENTER, 0);
-    ui->volume_up = button(volume_dock, "+", 12, 54, 56, 56, dock_clicked, ui);
-    ui->volume_slider = slider(volume_dock, 37, 136, 6, 236, ui);
+    ui->volume_up = button(volume_dock, "+", 0, 0, UI_VOLUME_WIDTH, UI_CONTENT_HEIGHT/5, dock_clicked, ui);
+    ui->volume_slider = slider(volume_dock, UI_VOLUME_WIDTH/2-3, 160, 6, 200, ui);
     lv_slider_set_range(ui->volume_slider, 0, 100);
-    ui->volume = label(volume_dock, "0%", 8, 394, 64, TEXT, false);
+    ui->volume = label(volume_dock, "0%", 8, 386, UI_VOLUME_WIDTH-16, TEXT, false);
     lv_obj_set_style_text_align(ui->volume, LV_TEXT_ALIGN_CENTER, 0);
-    ui->volume_down = button(volume_dock, "-", 12, 432, 56, 56, dock_clicked, ui);
+    ui->volume_down = button(volume_dock, "-", 0, UI_CONTENT_HEIGHT-UI_CONTENT_HEIGHT/5, UI_VOLUME_WIDTH, UI_CONTENT_HEIGHT/5, dock_clicked, ui);
+    lv_obj_t *volume_buttons[] = {ui->volume_up, ui->volume_down};
+    for(unsigned i=0;i<2;i++) {
+        lv_obj_set_style_text_font(volume_buttons[i], &lv_font_montserrat_48, 0);
+        lv_obj_set_style_radius(volume_buttons[i], 0, 0);
+        lv_obj_set_style_border_width(volume_buttons[i], 0, 0);
+        lv_obj_set_style_pad_all(volume_buttons[i], 0, 0);
+        /* Solid strokes stay chunky on the physical panel, unlike thin text. */
+        label_text(lv_obj_get_child(volume_buttons[i],0), "");
+        lv_obj_t *stroke=panel(volume_buttons[i],0,0,48,8,TEXT);
+        lv_obj_center(stroke);
+        lv_obj_clear_flag(stroke,LV_OBJ_FLAG_CLICKABLE);
+        if(i==0) {
+            stroke=panel(volume_buttons[i],0,0,8,48,TEXT);
+            lv_obj_center(stroke);
+            lv_obj_clear_flag(stroke,LV_OBJ_FLAG_CLICKABLE);
+        }
+    }
     lv_obj_t *nav = panel(root, 0, UI_NAV_Y, UI_WIDTH, UI_NAV_HEIGHT, BG);
     const char *tabs[] = {"Playing", "Queue", "Browse", "Search"};
     for (unsigned i=0;i<4;i++) {
@@ -464,7 +475,7 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
     ui->browse_feedback=label(ui->browse_content,"Choose a music source",24,504,432,MUTED,false);
     ui->search_content=panel(root,0,UI_HEADER_HEIGHT,UI_WIDTH,UI_CONTENT_HEIGHT,BG);
     ui->search_source=label(ui->search_content,"Choose a music provider in Settings",24,12,432,MUTED,false);
-    search_text_font=lv_font_montserrat_18; search_text_font.fallback=&search_pound_font;
+    search_text_font=punctuation_text_font;
     ui->search_input=lv_textarea_create(ui->search_content);
     lv_obj_set_pos(ui->search_input,24,48); lv_obj_set_size(ui->search_input,324,56);
     lv_obj_set_style_text_font(ui->search_input,&search_text_font,0);
@@ -518,9 +529,8 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
         bg(ui->mode_buttons[i],ACCENT,LV_STATE_CHECKED);
         fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
     }
-    ui->backdrop_button=button(ui->settings_content,"Backdrop: off",24,382,352,48,backdrop_clicked,ui);
-    ui->sources_button=button(ui->settings_content,"Music provider",24,442,352,40,providers_cb,NULL);
-    ui->power_button=button(ui->settings_content,"Screen power",24,488,352,40,power_open,ui);
+    ui->sources_button=button(ui->settings_content,"Music provider",24,390,352,56,providers_cb,NULL);
+    ui->power_button=button(ui->settings_content,"Screen power",24,458,352,56,power_open,ui);
     ui->power_panel=panel(root,0,0,UI_WIDTH,UI_HEIGHT,BG);
     label(ui->power_panel,"Screen power",24,24,432,TEXT,true);
     label(ui->power_panel,"Timeout seconds (0 = always on)",24,80,432,TEXT,false);
@@ -577,7 +587,6 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
         snprintf(ui->art_id,sizeof(ui->art_id),"%s",art_id);
         ui->art_loaded=false;
         lv_obj_add_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
         for(unsigned i=0;i<2;i++) lv_obj_clear_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
     }
     bool player_changed = strcmp(ui->current.player_id, state->player_id) != 0;
@@ -617,10 +626,7 @@ void controller_ui_update(controller_ui_t *ui, const ui_playback_t *state) {
     label_text(ui->title, state->track);
     label_text(ui->artist, state->artist);
     label_text(ui->album, state->album);
-    label_text(ui->mini_title, state->track);
     char text[260];
-    snprintf(text, sizeof(text), "%s%s%s", state->artist, state->artist[0] ? " - " : "", state->player);
-    label_text(ui->mini_artist, text);
     snprintf(text, sizeof(text), "%s%s", state->connected ? "" : "Offline - ", state->player);
     label_text(ui->player_text, text);
     label_text(ui->status, state->status);
@@ -658,27 +664,19 @@ bool controller_ui_set_artwork(controller_ui_t *ui, const char *art_id, const un
     if(!art_id || strcmp(ui->art_id,art_id) || !packet || length!=8+288*288*2 ||
        memcmp(packet,"MCAR",4) || packet[4]!=32 || packet[5]!=1 || packet[6]!=32 || packet[7]!=1) return false;
     if(!ui->art_pixels) ui->art_pixels=art_allocate(288*288*sizeof(lv_color_t));
-    if(!ui->thumbnail_pixels) ui->thumbnail_pixels=art_allocate(40*40*sizeof(lv_color_t));
-    if(!ui->art_pixels || !ui->thumbnail_pixels) return false;
+    if(!ui->art_pixels) return false;
     for(unsigned i=0;i<288*288;i++) {
         unsigned value=packet[8+i*2] | ((unsigned)packet[9+i*2]<<8);
         ui->art_pixels[i]=lv_color_make(((value>>11)&31)*255/31,((value>>5)&63)*255/63,(value&31)*255/31);
     }
-    for(unsigned y=0;y<40;y++) for(unsigned x=0;x<40;x++)
-        ui->thumbnail_pixels[y*40+x]=ui->art_pixels[(y*288/40)*288+x*288/40];
     ui->art_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=288,.h=288},
         .data_size=288*288*sizeof(lv_color_t),.data=(const uint8_t *)ui->art_pixels};
-    ui->thumbnail_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=40,.h=40},
-        .data_size=40*40*sizeof(lv_color_t),.data=(const uint8_t *)ui->thumbnail_pixels};
     lv_img_cache_invalidate_src(&ui->art_descriptor);
-    lv_img_cache_invalidate_src(&ui->thumbnail_descriptor);
     lv_img_set_src(ui->art_image,&ui->art_descriptor);
-    lv_img_set_src(ui->thumbnail_image,&ui->thumbnail_descriptor);
     lv_obj_clear_flag(ui->art_image,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ui->thumbnail_image,LV_OBJ_FLAG_HIDDEN);
     for(unsigned i=0;i<2;i++) lv_obj_add_flag(ui->art_placeholder[i],LV_OBJ_FLAG_HIDDEN);
     ui->art_loaded=true;
-    lv_obj_invalidate(ui->art_image); lv_obj_invalidate(ui->thumbnail_image);
+    lv_obj_invalidate(ui->art_image);
     return true;
 }
 
@@ -845,39 +843,4 @@ void controller_ui_provider_badges(controller_ui_t *ui,const char *selected,cons
         lv_img_set_src(ui->source_image,icon); lv_obj_clear_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(ui->source_badge);
     } else lv_obj_add_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
-}
-
-/* Gateway pixels are already cropped and darkened; retain the selected palette. */
-void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled) {
-    ui->backdrop_enabled=enabled;
-    bool visible=enabled && ui->backdrop_loaded;
-    lv_obj_set_style_bg_img_src(ui->root,visible ? &ui->backdrop_descriptor : NULL,0);
-    lv_style_set_bg_opa(&backgrounds[BG],visible ? LV_OPA_40 : LV_OPA_COVER);
-    lv_obj_report_style_change(&backgrounds[BG]);
-    if(ui->backdrop_button) label_text(lv_obj_get_child(ui->backdrop_button,0),enabled ? "Backdrop: gateway" : "Backdrop: off");
-}
-bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length) {
-    if(!packet) {
-        lv_obj_set_style_bg_img_src(ui->root,NULL,0);
-        lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
-#ifdef ESP_PLATFORM
-        free(ui->backdrop_pixels);
-#else
-        lv_mem_free(ui->backdrop_pixels);
-#endif
-        ui->backdrop_pixels=NULL; ui->backdrop_loaded=false;
-        controller_ui_enable_backdrop(ui,ui->backdrop_enabled); return true;
-    }
-    if(length!=8+UI_WIDTH*UI_HEIGHT*2 || memcmp(packet,"MCBG\xe0\x01\x20\x03",8)) return false;
-    if(!ui->backdrop_pixels) ui->backdrop_pixels=art_allocate(UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t));
-    if(!ui->backdrop_pixels) return false;
-    for(unsigned i=0;i<UI_WIDTH*UI_HEIGHT;i++) {
-        unsigned v=packet[8+i*2] | ((unsigned)packet[9+i*2]<<8);
-        ui->backdrop_pixels[i]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);
-    }
-    ui->backdrop_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=UI_WIDTH,.h=UI_HEIGHT},
-        .data_size=UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t),.data=(const uint8_t *)ui->backdrop_pixels};
-    lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
-    ui->backdrop_loaded=true; controller_ui_enable_backdrop(ui,ui->backdrop_enabled);
-    lv_obj_invalidate(ui->root); return true;
 }
