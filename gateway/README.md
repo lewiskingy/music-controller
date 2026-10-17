@@ -2,7 +2,7 @@
 
 The companion backend for ESP32 firmware and the browser prototype. It uses Python 3.12/aiohttp to authenticate to your Music Assistant server and relay a limited set of requests and live events. It does not serve audio or own a music library.
 
-Copied from Atlas main commit `630a5fe439a7b438a9381dd9a692550a247e91db` and updated with unmerged [Atlas PR #614](https://github.com/lewiskingy/atlas/pull/614) at `ef2979d0332a7aa1673c26ada1a6fd345e2b04ff`; Atlas remains unchanged. The newer seek, stable Queue playback, Browse/Search and artwork contracts support [music-controller PR #20](https://github.com/lewiskingy/music-controller/pull/20). Older firmware keeps using its existing commands; new native UI features require that firmware PR. See [architecture](../docs/architecture.md) for migration scope and [protocol](../contracts/music-assistant.md) for the API.
+For the complete installation sequence, follow [Getting Started](../docs/getting-started.md). This repository owns the gateway; Atlas is one independent deployment consumer, not a prerequisite. Current firmware uses the gateway for playback, Queue, Browse, Search, artwork, provider icons and settings.
 
 ## Requirements
 
@@ -49,6 +49,8 @@ The raw gateway port is bound to loopback for use by an existing host reverse pr
 
 ## HTTPS frontend and browser hosting
 
+See [DNS and trusted HTTPS setup](../docs/getting-started.md#3-configure-dns-and-trusted-https) for a host-proxy example using existing trusted certificate files, and DNS-challenge requirements for a new certificate. A physical device needs this before installation can succeed.
+
 Use your existing LAN reverse proxy, or the optional `web` profile:
 
 ```sh
@@ -65,6 +67,7 @@ Set a real `CONTROLLER_HOST`, matching `CONTROLLER_ORIGIN`, and `CONTROLLER_BIND
 | /controller/device/ws | Gateway `/device/ws` |
 | /controller/device/artwork/{art_id} | Gateway `/device/artwork/{art_id}` with device-token authentication |
 | /controller/ma/image | Music Assistant `/image` (browser artwork) |
+| /controller/settings* | Gateway `/settings*` (device settings and provider-logo uploads) |
 
 The example uses standard Caddy automatic HTTPS, which needs valid DNS and successful certificate issuance. A LAN-only server may require you to configure DNS challenges using an appropriate Caddy build, or supply an existing publicly trusted certificate through your reverse proxy. Do not open the controller to the internet to make this work. Caddy's local CA is not trusted by the firmware's default ESP-IDF CA bundle. Prefer an existing trusted TLS frontend if you already have one. Ports 80/443 must be free on the chosen bind address; existing Caddy users can reuse the routes rather than start another frontend.
 
@@ -96,9 +99,9 @@ To run without Docker, provide the same environment variables through your local
 
 Build only the gateway image with `docker build -t music-controller-gateway:local gateway`. CI tests and builds this component independently of firmware. No registry image publication is configured yet; release consumers build from a pinned checkout.
 
-## Expanded device capabilities (PR #20 compatibility)
+## Device capabilities
 
-After `gateway/ready`, the gateway emits `gateway/capabilities` advertising `seek`, `queue_item_play`, `browse`, `search` and `artwork_rgb565`. The old native firmware ignores unsupported capabilities; the pending portrait firmware uses them to enable its controls. Deploy this gateway before using that firmware, with the same URL/token and no NVS credential changes.
+After `gateway/ready`, the gateway emits `gateway/capabilities` advertising `seek`, `queue_item_play`, `browse`, `search` and `artwork_rgb565`. Current portrait firmware uses these capabilities to enable its controls. Older firmware ignores unsupported capabilities. Keep firmware/gateway versions compatible and review release notes for deployment order; existing URLs and keys do not need changing for ordinary updates.
 
 - Seek accepts integer seconds through `player_queues/seek`.
 - Queue playback accepts stable item IDs as well as legacy numeric positions.
@@ -106,7 +109,7 @@ After `gateway/ready`, the gateway emits `gateway/capabilities` advertising `see
 - `controller/search` accepts one provider and one media type, normalizes query case, and returns compact rows. An explicit unsupported `providers` argument permits one retry within the same provider's indexed library, labeled `scope: library`; it never switches to all-provider search.
 - Current queue items receive opaque `controller_art_id` values. Devices fetch fixed 288×288 RGB565 packets through `/device/artwork/{art_id}` with the same token. Missing/failing images get a generic cover; requests cannot supply arbitrary image URLs. Pillow is pinned in `requirements.txt` for bounded image conversion.
 
-The [protocol contract](../contracts/music-assistant.md) gives bounds, packet format and routing. These changes retain PR #614's mocked acceptance tests; live provider/device validation is still pending. If you use an existing reverse proxy rather than this example, add the artwork route as well as the device WebSocket route.
+The [protocol contract](../contracts/music-assistant.md) gives bounds, packet format and routing. Automated tests use simulated Music Assistant responses; validate your actual providers and device after deployment. If you use an existing reverse proxy rather than this example, add the artwork route as well as the device WebSocket route.
 
 ### Device splash image
 

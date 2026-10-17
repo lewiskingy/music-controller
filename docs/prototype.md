@@ -28,4 +28,4 @@ node --input-type=module --check < prototype/app.js
 node --input-type=module --check < prototype/music-assistant.js
 ```
 
-The dedicated prototype workflow runs these checks for prototype/contract changes. Tagged `vX.Y.Z` releases create a deterministic `.tar.gz` of `prototype/` plus SHA-256 checksum; they do not package firmware or gateway code. Serve the extracted files behind the same routes as above. Ordinary commits do not publish releases.
+The dedicated prototype workflow runs these checks for prototype/contract changes. Unified `vX.Y.Z` releases include a `.tar.gz` of `prototype/` and checksums alongside separate firmware, installer and gateway source assets. The prototype archive itself contains only browser files. Serve the extracted files behind the same routes as above. Ordinary commits do not publish releases.
