@@ -180,3 +180,14 @@ transient failures retain the last valid icon. Existing Atlas settings/artwork
 routes are sufficient. Deploy the updated gateway and firmware; no NVS
 reprovisioning or additional proxy paths are required for this feature. A gateway
 release/pin update is still needed for Atlas deployment.
+
+## Unified release version
+
+New releases use the repository's main `vX.Y.Z` tag for both firmware and gateway.
+Deployments that build this gateway from a pinned checkout (including Atlas)
+should use that tag; separate `gateway-v…` tags remain historical. The release
+includes a gateway source archive, not a registry-published image. The Windows
+[installer](../installer/README.md) can reuse or generate the matching
+`CONTROLLER_DEVICE_TOKEN` and explicitly export its environment setting. Apply
+that setting to the container yourself; no Music Assistant credentials go onto
+the device. Normal firmware updates preserve the device key.
