@@ -14,7 +14,7 @@ The controller runs on a supported ESP32 touchscreen. It controls your existing 
 | [Dedicated gateway](gateway/README.md) | Required service connecting the controller to Music Assistant, including authentication, artwork conversion, device settings and provider-logo overrides |
 | [Windows installer](installer/README.md) | Prebuilt firmware installation and initial Wi-Fi/gateway configuration; updates preserve settings |
 | [Case and dock designs](hardware/enclosure/README.md) | Printable STL/STEP designs, renders and assembly instructions; first-fit prototype, not yet physically validated |
-| [Browser prototype](docs/prototype.md) | Optional older landscape interaction prototype; not a preview of every current firmware feature |
+| [Browser prototype](docs/prototype.md) | Optional older 800 × 480 landscape interaction prototype; not a preview of every current firmware feature |
 
 ## What do I need?
 
@@ -38,6 +38,8 @@ You do not need Atlas, this author's domain, a Home Assistant installation speci
 5. [Install firmware](docs/getting-started.md#4-install-and-configure-the-controller) with Wi-Fi settings, your gateway URL and the matching controller key.
 6. [Verify first playback](docs/getting-started.md#5-verify-first-playback), set preferences, then optionally assemble the case.
 
+The touch interface uses **one focused screen** at a time, with large controls and scrolling confined to lists. The outer device screen does not scroll.
+
 ## Current limits
 
 - Automatic USB/battery power detection is unresolved. Auto uses the battery timeout; select USB/external manually for a permanently powered controller.
@@ -51,7 +53,7 @@ You do not need Atlas, this author's domain, a Home Assistant installation speci
 
 [Getting started](docs/getting-started.md) · [Hardware](docs/hardware.md) · [Gateway deployment](gateway/README.md) · [Firmware/manual installation](firmware/esp32/README.md) · [Windows installer](installer/README.md) · [Case assembly](hardware/enclosure/ASSEMBLY.md) · [Troubleshooting](docs/troubleshooting.md)
 
-For implementation details: [architecture](docs/architecture.md), [protocol](contracts/music-assistant.md), [development and releases](docs/development.md), and [firmware engineering history](docs/firmware-history.md).
+For implementation details: [architecture](docs/architecture.md), [protocol](contracts/music-assistant.md), [development](docs/development.md), [release preparation and downloads](docs/releases.md), and [firmware engineering history](docs/firmware-history.md).
 
 Keep `.env`, controller keys and private NVS binaries private. Deploy on a trusted LAN; the example browser/settings frontend is not a public authenticated service.
 
