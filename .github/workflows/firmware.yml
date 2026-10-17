@@ -30,6 +30,11 @@ on:
       - 'tests/test_esp32_providers_volume.py'
       - 'tests/test_esp32_provider_save.py'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_version:
+        type: string
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -124,3 +129,18 @@ jobs:
           path: dist/esp32/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Package installer-compatible release assets
+        if: inputs.release_version != ''
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          python ../../installer/build_manifest.py build ../../dist/release "$VERSION"
+          cp ../../dist/esp32/music-controller-full-flash.bin ../../dist/release/
+      - name: Upload release firmware
+        if: inputs.release_version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-controller-release-firmware
+          path: dist/release/
+          if-no-files-found: error

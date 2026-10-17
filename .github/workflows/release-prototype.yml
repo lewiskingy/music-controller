@@ -1,82 +1,92 @@
-name: Release Music Controller
+name: Prepare draft release
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional vMAJOR.MINOR.PATCH override (blank = next patch)'
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/prepare_release.py'
+      - 'tests/release/**'
 permissions:
   contents: read
+# Serialize version allocation through upload, including manual/tag runs.
+# Queuing preserves merges while a long firmware/Windows build is running.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('release-pr-{0}', github.event.number) || 'music-controller-draft-releases' }}
+  cancel-in-progress: false
+  queue: max
 jobs:
-  version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate release tag
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: '[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
-  installer:
-    needs: version
-    uses: ./.github/workflows/installer.yml
-  firmware:
-    needs: version
-    runs-on: ubuntu-latest
-    container: espressif/idf:v5.4.2
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build release firmware
-        shell: bash
-        run: |
-          set -euo pipefail
-          . /opt/esp/idf/export.sh
-          cd firmware/esp32
-          idf.py set-target esp32s3
-          idf.py build
-          python check_memory_layout.py build/music_controller.elf
-      - name: Prepare verified flash assets and hardware manifest
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: python installer/build_manifest.py firmware/esp32/build dist/release "$VERSION"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: music-controller-release-firmware
-          path: dist/release/
-          if-no-files-found: error
-  gateway:
-    needs: version
+  release-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r gateway/requirements.txt pytest==8.4.2
-      - run: python -m pytest gateway/tests -q
-      - run: docker build -t music-controller-gateway:${{ github.ref_name }} gateway
-  publish:
-    needs: [installer, firmware, gateway]
+      - run: python -m pip install pytest==8.4.2
+      - run: python -m pytest tests/release -q
+  version:
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    needs: release-tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.select.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select fixed source version
+        id: select
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          TAG_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python scripts/prepare_release.py select --version "${TAG_VERSION:-$REQUESTED_VERSION}"
+  installer:
+    needs: version
+    uses: ./.github/workflows/installer.yml
+  firmware:
+    needs: version
+    uses: ./.github/workflows/firmware.yml
+    with:
+      release_version: ${{ needs.version.outputs.version }}
+  gateway:
+    needs: version
+    uses: ./.github/workflows/gateway.yml
+  prototype:
+    needs: version
+    uses: ./.github/workflows/prototype.yml
+  draft:
+    needs: [version, installer, firmware, gateway, prototype]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: music-controller-*
-          merge-multiple: true
+          name: music-controller-release-firmware
           path: dist/release
-      - name: Package prototype and gateway source from the same tag
+      - uses: actions/download-artifact@v4
+        with:
+          name: music-controller-windows
+          path: dist/release
+      - name: Package prototype and gateway from the tested commit
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          tar -czf "dist/release/music-controller-${VERSION}.tar.gz" -C prototype .
+          tar -czf "dist/release/music-controller-prototype-${VERSION}.tar.gz" -C prototype .
           tar -czf "dist/release/music-controller-gateway-${VERSION}.tar.gz" gateway
-          cd dist/release
-          sha256sum *.bin *.exe *.json *.tar.gz > SHA256SUMS
-      - name: Publish all assets together
+      - name: Verify assets and prepare draft (never publish)
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" dist/release/*
-          else
-            gh release create "$VERSION" dist/release/* --verify-tag --title "Music Controller $VERSION" --generate-notes
-          fi
+          VERSION: ${{ needs.version.outputs.version }}
+        run: python scripts/prepare_release.py prepare --version "$VERSION"

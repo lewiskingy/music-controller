@@ -47,7 +47,7 @@ Omit `--rel` for the latest compatible stable release. Omit `--port` only when e
 
 ## Releases and Atlas
 
-A single `vX.Y.Z` tag versions firmware, installer, gateway source and prototype. The release workflow builds firmware using ESP-IDF 5.4.2, creates checksummed per-profile flash assets from `flasher_args.json`, builds both Windows executables, runs installer/gateway tests, builds the gateway container, and publishes assets only after all component jobs succeed.
+A single `vX.Y.Z` tag versions firmware, installer, gateway source and prototype. Successful main builds now prepare tagged drafts automatically; a maintainer reviews/tests and publishes them manually. [Release operations and asset guide](../docs/releases.md). The release workflow builds firmware using ESP-IDF 5.4.2, creates checksummed per-profile flash assets from `flasher_args.json`, builds both Windows executables, runs installer/gateway tests, builds the gateway container, and attaches assets to a draft only after all component jobs succeed. Drafts and prereleases are excluded from the stable installer picker.
 
 The gateway is still built from source by deployment consumers; this does **not** introduce a container registry requirement. A gateway source archive is attached to the release and the manifest records its matching main tag. Atlas should pin its external gateway build to that same `vX.Y.Z` tag instead of `gateway-vX.Y.Z`. This change does not update Atlas's pin or deploy anything. Historical tags remain valid. Describe which components changed in release notes; a firmware-only change does not itself require deploying an unchanged gateway.
 

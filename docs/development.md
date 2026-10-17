@@ -29,7 +29,7 @@ The firmware guide documents the real ESP-IDF v5.4.2 build. Python source-contra
 | A component's workflow YAML | That workflow only |
 | General README/docs/hardware documentation | No component build |
 
-Component `.md` files are also excluded from build triggers. Manual dispatch runs the chosen workflow regardless of paths. GitHub push path filters compare the push's changed files; PR filters compare the PR diff. A combined firmware+gateway change naturally runs both. The unified tag release workflow runs firmware, installer and gateway validation before publishing; enclosure tags use their separate workflow.
+Component `.md` files are also excluded from build triggers. Manual dispatch runs the chosen workflow regardless of paths. GitHub push path filters compare the push's changed files; PR filters compare the PR diff. A combined firmware+gateway change naturally runs both. Every main push also runs the complete draft-release pipeline, irrespective of component path filters; enclosure tags use their separate workflow.
 
 Workflow path filters can leave required checks pending when a workflow is skipped. Do not make each path-filtered workflow an unconditional required branch-protection check; if you need a universal merge gate later, add an always-running aggregate that accepts intentionally skipped components. Repository protection settings are not changed here.
 
@@ -39,11 +39,9 @@ Give new tests a component-specific directory and include it in that workflow's 
 
 ## Releases and deployment
 
-New `vX.Y.Z` tags use `.github/workflows/release-prototype.yml` (named **Release Music Controller**) to build firmware and Windows GUI/CLI installers, test/build the gateway, and publish the per-profile flash binaries, release manifest, checksums, prototype archive and gateway source archive together. The installer only offers compatible manifest-bearing releases. See [installer release details](../installer/README.md#releases-and-atlas).
+Every main push runs `.github/workflows/release-prototype.yml` (**Prepare draft release**) using reusable firmware, installer, gateway and prototype workflows. After validation it attaches all assets to a tagged **draft**, never automatically publishes. Main merges default to the next patch version; manual main-branch dispatch supports a major/minor override. Manual stable tag pushes also prepare drafts. See [release operations and asset guide](releases.md) for review, promotion, retries and installer limitations.
 
-Firmware CI also uploads Actions artifacts, including a merged USB flash image. Their filenames/package layout differ from tagged release assets. Gateway CI does not publish a registry image; consumers build from a pinned source tag. Preserve gateway environment and volumes during deployment. Explain in release notes which components changed and whether an updated gateway is required before firmware.
-
-Historical `gateway-v…` tags remain valid; new unified releases use the main version tag. Enclosure `enclosure-v…` tags publish independent print packages/renders. Ordinary component commits do not publish releases or deploy Atlas. Atlas is a separate consumer whose release pin is managed in its own repository.
+Firmware CI also uploads Actions artifacts. The draft includes the merged full-flash image as well as installer-compatible per-profile binaries. Gateway containers are built/tested but not registry-published. Consumers build from exact source tags, preserving environment/volumes. Atlas pin changes and deployment remain separate operations.
 
 ## Engineering records
 

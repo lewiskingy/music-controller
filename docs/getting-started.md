@@ -140,3 +140,5 @@ Once USB operation works, follow the [case assembly guide](../hardware/enclosure
 ## 7. Later updates
 
 Use the installer update mode for firmware. For the gateway, check out the chosen release on its host and run `docker compose up -d --build gateway` from `gateway/`; retain `.env` and the data volume. Review release notes for compatibility and deployment order. New releases share a `vX.Y.Z` source tag; historical `gateway-v…` tags remain valid for existing deployments. A firmware-only change does not require redeploying an unchanged gateway.
+
+For where to find installer/firmware/gateway files and how maintainers promote tested drafts, see [release preparation and downloads](releases.md).
