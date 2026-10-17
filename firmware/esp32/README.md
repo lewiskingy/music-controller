@@ -8,6 +8,24 @@ Current firmware targets the original **Waveshare ESP32-S3-Touch-LCD-4.3**, 800Ã
 
 The manual instructions below use **Actions artifact filenames**. Tagged installer releases use names such as `waveshare-4.3-application.bin`; these are separate bootloader/partitions/OTA/application files, not a merged image. Do not substitute one filename for another without checking its role and address. Use the release installer to manage those assets.
 
+## Release binaries and flash addresses
+
+**`waveshare-4.3-application.bin` is the application firmware**, equivalent to `music_controller.bin` in an Actions artifact. The Actions ZIP also includes other binaries, a merged image and debugging/build files, so its size is not the application's size.
+
+For the current board/layout, a manual complete installation uses these public release files plus locally generated private settings:
+
+| File | Address | Purpose |
+| --- | --- | --- |
+| `waveshare-4.3-bootloader.bin` | `0x0` | Startup code |
+| `waveshare-4.3-partitions.bin` | `0x8000` | Flash layout |
+| `controller-nvs.bin` (private, generated locally) | `0x9000` | Wi-Fi, gateway URL/key and initial preferences |
+| `waveshare-4.3-otadata.bin` | `0xf000` | Application boot selection |
+| `waveshare-4.3-application.bin` | `0x20000` | Controller application |
+
+Use `release-manifest.json` as the authority for the chosen release's public component offsets and hashes. Private NVS is never a public release asset. An ordinary compatible application-only update preserves NVS; the installer also resets boot selection as needed. A complete erase requires provisioning settings again.
+
+Where supplied, `music-controller-full-flash.bin` combines the public firmware components for writing at `0x0`; restore private NVS afterward. v0.5.0 supplies separate binaries only, not a merged release image. The `.tar.gz` release assets contain gateway source or the browser prototype, not ESP32 firmware. See the [complete release asset guide](../../docs/releases.md).
+
 ## Current features and limits
 
 Now Playing, Players, Providers, artwork, Queue, Browse and Search use separate full-screen views. Firmware supports playback/seek, 5% volume stepping, persisted player/provider and colour preferences, provider icons and backlight timeouts. Sonos Pause is disabled while playing; Stop is available. See [current project limits](../../README.md#current-limits).

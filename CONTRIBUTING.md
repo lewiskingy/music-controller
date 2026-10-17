@@ -25,3 +25,7 @@ Discuss substantial features, protocol changes and new board support in an issue
 State when gateway and firmware must be updated together, which version/deployment order is needed, and whether consumers need a release-pin/configuration update. Preserve credentials/preferences across ordinary updates. Never claim a simulated test proves real display timing, battery runtime or Music Assistant interoperability.
 
 Maintainers review and release changes. Opening a PR does not authorize merging, tagging or deploying to consumers. Atlas is a separate deployment consumer of this repository's gateway, not a prerequisite for contributors or users.
+
+## Firmware packaging and release documentation
+
+Read the [release asset guide](docs/releases.md) and [binary/address table](firmware/esp32/README.md#release-binaries-and-flash-addresses) before changing packaging or flashing instructions. Keep Actions artifact filenames, release filenames and merged images distinct. Document application-only updates versus complete installation, including private NVS provisioning. Never distribute NVS credentials with public firmware. Agents must preserve these distinctions as well as follow [AGENTS.md](AGENTS.md).
