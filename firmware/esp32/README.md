@@ -73,6 +73,32 @@ py -m esptool --chip esp32s3 --port COM5 write-flash 0x9000 firmware/esp32/contr
 
 Adjust paths if the extracted artifact and checkout are in different directories. **Full merged images may overwrite the NVS region: always flash private NVS afterwards.** Resetting the original NVS also restores its originally provisioned preferences; on-device player/provider choices made since then can be lost. Application-only updates can preserve NVS if written at the correct application offset.
 
+## Wi-Fi power saving
+
+Wi-Fi modem sleep is **disabled by default** (`WIFI_PS_NONE`), on battery and
+USB, including while the backlight is off. The screen timeout does not disconnect
+Wi-Fi or suspend the gateway connection. Keeping the radio awake uses more power;
+battery runtime and sleep/wake connectivity need physical testing.
+
+To explicitly enable modem sleep, set `wifi_sleep` in the `controller` NVS
+namespace to a `u8` value of `1`. This selects `WIFI_PS_MIN_MODEM`, which
+should maintain association while periodically sleeping the radio. Missing,
+zero, invalid or unreadable values select `WIFI_PS_NONE`. The setting is read at
+boot; restart after changing it. Startup logs report the selected mode.
+
+The manual `provision.py` tool now asks “Enable Wi-Fi modem sleep to save power?”
+and defaults to No. For a manually maintained NVS CSV, the opt-in row is:
+
+```csv
+wifi_sleep,data,u8,1
+```
+
+The packaged installer leaves this optional key absent, giving the same awake
+default. Existing NVS images need no changes for the new default: install an
+application-only firmware update to preserve credentials and preferences. Only
+regenerate/flash a private NVS image if deliberately changing provisioning;
+replacing NVS also replaces its other saved settings.
+
 ## Hardware acceptance and diagnostics
 
 Verify live metadata, player selection across reset, transport/volume on the correct output, Providers → change → Save across reset, and recovery after Wi-Fi/gateway interruption. The outer screen never scrolls or stacks primary views.

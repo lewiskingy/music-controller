@@ -39,6 +39,11 @@ def timeout(prompt):
 battery_timeout = timeout("Optional default battery timeout seconds [30]: ")
 usb_timeout = timeout("Optional default USB timeout seconds [0 = always on]: ")
 
+wifi_sleep_answer = input("Enable Wi-Fi modem sleep to save power? [y/N]: ").strip().lower()
+if wifi_sleep_answer not in ("", "n", "no", "y", "yes"):
+    sys.exit("Wi-Fi sleep must be yes or no.")
+wifi_sleep = int(wifi_sleep_answer in ("y", "yes"))
+
 output = ROOT / "controller-nvs.bin"
 with tempfile.TemporaryDirectory() as temp:
     csv_path = Path(temp) / "config.csv"
@@ -46,6 +51,7 @@ with tempfile.TemporaryDirectory() as temp:
         writer = csv.writer(stream)
         writer.writerow(["key", "type", "encoding", "value"])
         writer.writerow(["controller", "namespace", "", ""])
+        writer.writerow(["wifi_sleep", "data", "u8", wifi_sleep])
         for key, value in [
             ("wifi_ssid", ssid), ("wifi_pass", password),
             ("gateway_url", gateway), ("device_token", token),
