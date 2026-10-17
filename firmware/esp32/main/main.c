@@ -177,6 +177,7 @@ static bool can_seek(void) {
 static char provider_feedback[96] = "Choose a provider, then Save";
 static esp_websocket_client_handle_t socket_handle;
 static bool ready;
+static bool wifi_sleep; /* NVS opt-in; keep the radio awake by default. */
 static volatile bool ip_ready;
 static unsigned request_id;
 static const char *TAG = "controller";
@@ -1061,6 +1062,14 @@ static bool load_config(void) {
     READ("wifi_ssid",ssid); READ("wifi_pass",password);
     READ("device_token",token); READ("gateway_url",url);
 #undef READ
+    uint8_t sleep = 0;
+    esp_err_t sleep_err = nvs_get_u8(n, "wifi_sleep", &sleep);
+    wifi_sleep = sleep_err == ESP_OK && sleep == 1;
+    if (sleep_err != ESP_OK && sleep_err != ESP_ERR_NVS_NOT_FOUND)
+        ESP_LOGW(TAG, "Cannot read wifi_sleep; using Wi-Fi sleep disabled: %s",
+                 esp_err_to_name(sleep_err));
+    else if (sleep_err == ESP_OK && sleep > 1)
+        ESP_LOGW(TAG, "Invalid wifi_sleep value; using Wi-Fi sleep disabled");
     len=sizeof(preferred);
     nvs_get_str(n,"player_id",preferred,&len);
     len = sizeof(selected_provider_ids);
@@ -1604,6 +1613,9 @@ void app_main(void) {
     esp_sntp_config_t time_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     ESP_ERROR_CHECK(esp_netif_sntp_init(&time_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(wifi_sleep ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE));
+    ESP_LOGI(TAG, "Wi-Fi modem sleep %s (NVS wifi_sleep=%u); independent of screen timeout",
+             wifi_sleep ? "enabled" : "disabled", (unsigned)wifi_sleep);
     ESP_LOGI("controller", "LCD ready; waiting for Wi-Fi and authenticated gateway");
     log_main_stack("network init");
     log_memory("network init");
