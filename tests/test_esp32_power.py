@@ -39,6 +39,35 @@ int main(void) {
     assert(!power_suppress(&p,false)); assert(!power_sleep_ready(&p,40000));
     power_begin_sleep(&p,UINT32_MAX-1000);
     assert(!power_sleep_ready(&p,998)); assert(power_sleep_ready(&p,999));
+    /* Offline time, including a long clock sync, never consumes idle time. */
+    p=(power_activity_t){.last_touch=0};
+    power_connection(&p,29000,false);
+    assert(p.waiting); assert(!power_expired(&p,900000,30));
+    power_connection(&p,900000,true);
+    assert(!p.waiting); assert(!power_expired(&p,929999,30));
+    assert(power_expired(&p,930000,30));
+    /* Healthy metadata/readiness checks must not continually reset idle. */
+    power_connection(&p,930000,true); assert(power_expired(&p,930000,30));
+    /* Connection loss during pre-sleep cancels the pending blank. */
+    power_begin_sleep(&p,930000);
+    power_connection(&p,931999,false);
+    assert(!p.sleep_pending); assert(!power_sleep_ready(&p,932000));
+    power_connection(&p,1000000,true);
+    assert(!power_expired(&p,1029999,30)); assert(power_expired(&p,1030000,30));
+    /* Background reconnection cannot illuminate a screen already asleep. */
+    p.asleep=true; power_connection(&p,1100000,false);
+    power_connection(&p,1200000,true); assert(p.asleep);
+    /* Wake while offline remains awake until ready, then gets full timeout. */
+    power_connection(&p,1300000,false);
+    assert(power_touch(&p,1300100,true)); p.asleep=false;
+    assert(power_suppress(&p,true)); assert(power_suppress(&p,false));
+    assert(!power_expired(&p,1500000,30));
+    power_connection(&p,1500000,true);
+    assert(!power_expired(&p,1529999,30)); assert(power_expired(&p,1530000,30));
+    /* Recovery at tick wrap also starts a complete idle interval. */
+    power_connection(&p,UINT32_MAX-500,false);
+    power_connection(&p,UINT32_MAX-100,true);
+    assert(!power_expired(&p,898,1)); assert(power_expired(&p,899,1));
     return 0;
 }
 ''')

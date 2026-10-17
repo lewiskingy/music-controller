@@ -813,6 +813,7 @@ static void restore_connection_splash(void) {
 }
 static void sync_connection_splash(void) {
     display_ready=ready && ip_ready && ws_connected;
+    power_connection(&power_activity,lv_tick_get(),display_ready);
     snprintf(display_status,sizeof(display_status),"%s",state);
     if(!power_activity.sleep_pending) restore_connection_splash();
 }
@@ -828,6 +829,12 @@ static void power_read(lv_indev_drv_t *driver,lv_indev_data_t *data) {
 }
 static void power_tick(lv_timer_t *timer) {
     (void)timer;
+    /* Check live connectivity even while the application waits for clock sync.
+     * A loss during the two-second sleep splash cancels backlight-off. */
+    bool was_pending=power_activity.sleep_pending;
+    power_connection(&power_activity,lv_tick_get(),ready && ip_ready && ws_connected);
+    if(was_pending && !power_activity.sleep_pending)
+        controller_splash_status("Reconnecting...");
     /* No reliable USB-present input exists yet: Auto deliberately uses battery. */
     unsigned seconds=power_timeout(power_battery,power_usb,power_mode);
     if(power_expired(&power_activity,lv_tick_get(),seconds)) {

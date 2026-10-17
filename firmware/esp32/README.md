@@ -35,6 +35,10 @@ the gateway or Music Assistant, and briefly before backlight-off. The current
 connection status is shown over the image; it blocks touches to the controls
 until Wi-Fi and the authenticated Music Assistant gateway session are ready.
 Connection loss covers any open view, and reconnecting restores that view.
+While the screen is on, waiting for connectivity or clock sync does not count
+toward the idle timeout. Once ready, the full configured timeout starts afresh.
+A disconnection during the two-second pre-sleep image cancels screen blanking.
+Background disconnections/reconnections do not wake an already dark screen.
 An unavailable player alone does not hide the player selector. Waking while
 offline restores the waiting screen and consumes the first touch as before. Auto power mode uses battery timing even on USB; choose USB/external manually for that timeout. This is backlight power saving, not deep sleep. Wireless OTA is not implemented.
 
