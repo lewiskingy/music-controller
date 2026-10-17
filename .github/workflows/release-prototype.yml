@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optional vMAJOR.MINOR.PATCH override (blank = next patch)'
+        description: 'Optional vMAJOR.MINOR.PATCH override (blank = refresh rolling draft or next patch)'
         type: string
         default: ''
   pull_request:
@@ -42,12 +42,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Select fixed source version
+      - name: Select rolling candidate version (fixed for this build)
         id: select
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          ROLLING: ${{ github.ref == 'refs/heads/main' && '--rolling' || '' }}
           TAG_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-        run: python scripts/prepare_release.py select --version "${TAG_VERSION:-$REQUESTED_VERSION}"
+        run: python scripts/prepare_release.py select --version "${TAG_VERSION:-$REQUESTED_VERSION}" ${ROLLING}
   installer:
     needs: version
     uses: ./.github/workflows/installer.yml
@@ -89,4 +91,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
-        run: python scripts/prepare_release.py prepare --version "$VERSION"
+          ROLLING: ${{ github.ref == 'refs/heads/main' && '--rolling' || '' }}
+        run: python scripts/prepare_release.py prepare --version "$VERSION" ${ROLLING}

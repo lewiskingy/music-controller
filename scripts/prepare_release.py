@@ -1,4 +1,4 @@
-"""Select immutable release versions and publish verified assets as a draft only."""
+"""Prepare a rolling main draft; published releases remain immutable."""
 import argparse
 import hashlib
 import json
@@ -36,10 +36,39 @@ def run(*args):
     return subprocess.check_output(args, text=True).strip()
 
 
-def select(requested=""):
+def releases():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    pages = json.loads(run("gh", "api", "--paginate", "--slurp",
+                           f"repos/{repo}/releases?per_page=100"))
+    return [r for page in pages for r in page]
+
+
+def rolling_version(tags, commit_tags, records, requested=""):
+    """Prefer the highest unpublished candidate above all published versions."""
+    published = [version_key(r["tag_name"]) for r in records
+                 if not r["draft"] and VERSION.fullmatch(r["tag_name"])]
+    floor = max(published, default=(-1, -1, -1))
+    drafts = [r["tag_name"] for r in records if r["draft"]
+              and VERSION.fullmatch(r["tag_name"])
+              and version_key(r["tag_name"]) > floor]
+    if requested:
+        version_key(requested)
+        if requested in drafts:
+            return requested
+        if version_key(requested) <= floor:
+            raise ValueError("Rolling draft must be newer than published releases")
+        return choose_version(tags, commit_tags, requested)
+    if drafts:
+        return max(drafts, key=version_key)
+    # Never reuse a published version, even when retrying its original commit.
+    return choose_version(tags, [])
+
+
+def select(requested="", rolling=False):
     tags = run("git", "tag", "--list").splitlines()
     commit_tags = run("git", "tag", "--points-at", "HEAD").splitlines()
-    version = choose_version(tags, commit_tags, requested)
+    version = (rolling_version(tags, commit_tags, releases(), requested) if rolling
+               else choose_version(tags, commit_tags, requested))
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
         stream.write(f"version={version}\n")
     print(f"Selected {version} for {run('git', 'rev-parse', 'HEAD')}")
@@ -85,25 +114,34 @@ def verify_bundle(directory, version):
     return sorted(expected | {"SHA256SUMS"})
 
 
-def prepare(directory, version):
+def prepare(directory, version, rolling=False):
     assets = verify_bundle(directory, version)
     sha = run("git", "rev-parse", "HEAD")
     repo = os.environ["GITHUB_REPOSITORY"]
-    # Refresh after building; reject a manual tag collision rather than move it.
+    records = releases()
+    release = next((r for r in records if r["tag_name"] == version), None)
+    # Publication while a build is running must never move its tag/assets.
+    if release and not release["draft"]:
+        if rolling:
+            raise ValueError("Candidate was published during this build; run main again")
+        print(f"{version} is already published; leaving its assets unchanged")
+        return
     run("git", "fetch", "origin", "+refs/tags/*:refs/tags/*")
     tags = run("git", "tag", "--list").splitlines()
     if version in tags:
         if run("git", "rev-parse", f"{version}^{{commit}}") != sha:
-            raise ValueError("Release tag points to a different commit")
+            if not (rolling and release and release["draft"]):
+                raise ValueError("Release tag points to a different commit")
+            # A retry of an older workflow must not roll the candidate backward.
+            if run("git", "merge-base", version, sha) != run(
+                    "git", "rev-parse", f"{version}^{{commit}}"):
+                raise ValueError("Rolling draft is newer or divergent; refusing rollback")
+            # Only an explicitly identified unpublished draft may move.
+            run("gh", "api", f"repos/{repo}/git/refs/tags/{version}",
+                "--method", "PATCH", "-f", f"sha={sha}", "-F", "force=true")
     else:
-        # Create the actual tag explicitly, even while the release is a draft.
         run("gh", "api", f"repos/{repo}/git/refs", "--method", "POST",
             "-f", f"ref=refs/tags/{version}", "-f", f"sha={sha}")
-    pages = json.loads(run("gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
-    release = next((r for page in pages for r in page if r["tag_name"] == version), None)
-    if release and not release["draft"]:
-        print(f"{version} is already published; leaving its assets unchanged")
-        return
     if release:
         # Retries can repair an incomplete draft, never a published release.
         run("gh", "release", "upload", version, *[str(directory / name) for name in assets], "--clobber")
@@ -113,6 +151,30 @@ def prepare(directory, version):
                   *[str(directory / name) for name in assets],
                   "--verify-tag", "--draft", "--latest=false", "--generate-notes",
                   "--title", f"Music Controller {version}")
+    if rolling:
+        # Refresh generated notes as commits accumulate; a staging draft is mutable.
+        published = [r["tag_name"] for r in records if not r["draft"]
+                     and VERSION.fullmatch(r["tag_name"])]
+        previous = (["-f", f"previous_tag_name={max(published, key=version_key)}"]
+                    if published else [])
+        notes = json.loads(run(
+            "gh", "api", f"repos/{repo}/releases/generate-notes", "--method", "POST",
+            "-f", f"tag_name={version}", "-f", f"target_commitish={sha}", *previous))["body"]
+        body = directory / "rolling-notes.md"
+        body.write_text(f"Rolling candidate from main commit `{sha}`. "
+                        "Assets and this tag can change until publication.\n\n" + notes)
+        try:
+            run("gh", "release", "edit", version,
+                "--target", sha, "--notes-file", str(body))
+        finally:
+            body.unlink()
+        # Converge legacy per-merge drafts only after the replacement is complete.
+        # Retain their tags so existing references are not silently invalidated.
+        for old in releases():
+            if (old["draft"] and VERSION.fullmatch(old["tag_name"])
+                    and version_key(old["tag_name"]) < version_key(version)):
+                run("gh", "api", f"repos/{repo}/releases/{old['id']}",
+                    "--method", "DELETE")
     print(f"Draft ready: {url}")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a") as stream:
@@ -126,9 +188,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["select", "prepare"])
     parser.add_argument("--version", default="")
+    parser.add_argument("--rolling", action="store_true")
     parser.add_argument("--directory", type=Path, default=Path("dist/release"))
     args = parser.parse_args()
     if args.command == "select":
-        select(args.version)
+        select(args.version, args.rolling)
     else:
-        prepare(args.directory, args.version)
+        prepare(args.directory, args.version, args.rolling)
