@@ -4,8 +4,8 @@
 #include "lvgl.h"
 
 enum { UI_WIDTH = 480, UI_HEIGHT = 800, UI_HEADER_HEIGHT = 64,
-       UI_CONTENT_WIDTH = 400, UI_CONTENT_HEIGHT = 532, UI_VOLUME_X = 400,
-       UI_VOLUME_WIDTH = 80, UI_DOCK_Y = 596, UI_DOCK_HEIGHT = 136,
+       UI_CONTENT_WIDTH = 384, UI_CONTENT_HEIGHT = 532, UI_VOLUME_X = 384,
+       UI_VOLUME_WIDTH = 96, UI_DOCK_Y = 596, UI_DOCK_HEIGHT = 136,
        UI_NAV_Y = 732, UI_NAV_HEIGHT = 68 };
 typedef enum { UI_PLAYING, UI_PLAYERS, UI_PROVIDERS, UI_SETTINGS, UI_QUEUE, UI_BROWSE, UI_SEARCH } ui_view_t;
 typedef enum { UI_PREVIOUS, UI_PLAY_STOP, UI_NEXT, UI_VOLUME_DOWN, UI_VOLUME_UP,
@@ -61,21 +61,16 @@ typedef struct {
     bool search_loading;
     lv_obj_t *players_list, *providers_list, *provider_feedback, *save_button;
     lv_obj_t *heading, *player_text, *title, *artist, *album, *status;
-    lv_obj_t *mini_title, *mini_artist, *volume, *transport[3], *transport_text;
+    lv_obj_t *volume, *transport[3], *transport_text;
     lv_obj_t *volume_down, *volume_up, *volume_slider, *navigation[4];
     lv_obj_t *timeline, *elapsed, *duration;
     lv_obj_t *settings_button, *player_button, *settings_content, *sources_button, *volume_heading;
     lv_obj_t *palette_buttons[6], *mode_buttons[2];
-    lv_obj_t *art_panel, *art_image, *art_placeholder[2], *thumbnail, *thumbnail_image;
-    lv_img_dsc_t art_descriptor, thumbnail_descriptor;
-    lv_color_t *art_pixels, *thumbnail_pixels;
+    lv_obj_t *art_panel, *art_image, *art_placeholder[2];
+    lv_img_dsc_t art_descriptor;
+    lv_color_t *art_pixels;
     char art_id[65];
     bool art_loaded;
-    lv_obj_t *backdrop_button;
-    lv_img_dsc_t backdrop_descriptor;
-    lv_color_t *backdrop_pixels;
-    bool backdrop_enabled, backdrop_loaded;
-    void (*backdrop_cb)(bool enabled);
     lv_obj_t *power_button, *power_panel, *power_battery, *power_usb, *power_mode, *power_feedback;
     void (*power_cb)(int battery, int usb, int mode);
     ui_provider_icon_t provider_icons[UI_PROVIDER_ICONS];
@@ -118,9 +113,6 @@ void controller_ui_search(controller_ui_t *ui, const ui_media_item_t *items, uns
 /* Radio selection: clicking the selected row cannot clear it. */
 void controller_ui_choose_source(lv_obj_t *list, lv_obj_t *chosen);
 lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected);
-
-void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled);
-bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length);
 
 void controller_ui_power(controller_ui_t *ui, int battery, int usb, int mode, const char *message);
 

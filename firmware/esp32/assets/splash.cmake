@@ -1,0 +1,13 @@
+# Build-time embedding of the original PNG; no network or Python image packages.
+set(CONTROLLER_SPLASH_ASSET_DIR "${CMAKE_CURRENT_LIST_DIR}")
+function(controller_splash_asset output)
+    set(image "${CONTROLLER_SPLASH_ASSET_DIR}/halloween.png")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${image}")
+    file(READ "${image}" pixels HEX)
+    string(LENGTH "${pixels}" size)
+    math(EXPR size "${size}/2")
+    string(REGEX REPLACE "(..)" "0x\\1," pixels "${pixels}")
+    set(source "${CMAKE_CURRENT_BINARY_DIR}/controller_splash_asset.c")
+    file(WRITE "${source}" "#include \"lvgl.h\"\nstatic const uint8_t pixels[]={${pixels}};\nconst lv_img_dsc_t controller_splash_image={.header={.cf=LV_IMG_CF_RAW_ALPHA,.w=480,.h=800},.data_size=${size},.data=pixels};\n")
+    set(${output} "${source}" PARENT_SCOPE)
+endfunction()

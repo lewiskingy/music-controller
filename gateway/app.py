@@ -8,7 +8,6 @@ import time
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 from provider_icons import ProviderIcons
 from settings import DeviceSettings
-from backdrop import BackdropStore, MAX_UPLOAD
 from artwork import ArtworkService
 from browse import BrowseRequest, SearchRequest, validate_browse, validate_search
 
@@ -265,16 +264,7 @@ async def health(_):
 
 
 def create_app():
-    app = web.Application(client_max_size=MAX_UPLOAD)
-    backdrop = BackdropStore(os.environ.get("CONTROLLER_BACKDROP_STATE", "/data/backdrop.json"))
-    source = os.environ.get("CONTROLLER_BACKDROP_FILE", "")
-    if source and not backdrop.path.exists():
-        from pathlib import Path
-        data = Path(source).read_bytes()
-        if len(data) > MAX_UPLOAD:
-            raise ValueError("Backdrop file exceeds 8 MiB")
-        backdrop.save({**backdrop.state, "enabled": True, "image": backdrop.normalize(data)})
-    backdrop.routes(app)
+    app = web.Application(client_max_size=8 * 1024 * 1024)
     app["provider_icons"]=ProviderIcons(os.environ.get("CONTROLLER_PROVIDER_ICONS_STATE","/data/provider-icons.json"))
     app["provider_icons"].routes(app)
     app["device_settings"] = DeviceSettings(CONTROLLER_ORIGIN)

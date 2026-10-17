@@ -33,6 +33,7 @@
 #include "controller_ui.h"
 #include "playback_policy.h"
 #include "power_policy.h"
+#include "controller_splash.h"
 
 /* sdkconfig.defaults does not override an existing sdkconfig: fail closed on stale builds. */
 #if CONFIG_ESP_MAIN_TASK_STACK_SIZE < 16384
@@ -100,10 +101,6 @@ static char current_source_icon[65], provider_icon_result_id[65];
 static unsigned char *provider_icon_result;
 static bool gateway_can_provider_icons;
 static bool gateway_can_artwork;
-static bool backdrop_requested;
-static unsigned char *backdrop_result;
-static bool backdrop_clear;
-static unsigned backdrop_generation, backdrop_result_generation;
 static unsigned char *art_result;
 static char art_result_id[65];
 static EXT_RAM_BSS_ATTR ui_queue_item_t queue_items[UI_QUEUE_PAGE_SIZE];
@@ -804,6 +801,7 @@ static void power_read(lv_indev_drv_t *driver,lv_indev_data_t *data) {
     power_original_read(driver,data);
     bool pressed=data->state==LV_INDEV_STATE_PR;
     if(power_touch(&power_activity,lv_tick_get(),pressed)) {
+        controller_splash_hide();
         if(waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
     }
     if(power_suppress(&power_activity,pressed)) data->state=LV_INDEV_STATE_REL;
@@ -813,7 +811,16 @@ static void power_tick(lv_timer_t *timer) {
     /* No reliable USB-present input exists yet: Auto deliberately uses battery. */
     unsigned seconds=power_timeout(power_battery,power_usb,power_mode);
     if(power_expired(&power_activity,lv_tick_get(),seconds)) {
-        if(waveshare_rgb_lcd_bl_off()==ESP_OK) power_activity.asleep=true;
+        controller_splash_show(false);
+        /* This callback runs on the LVGL task: complete the frame before timing. */
+        lv_refr_now(lv_disp_get_default());
+        power_begin_sleep(&power_activity,lv_tick_get());
+    }
+    if(power_sleep_ready(&power_activity,lv_tick_get()) &&
+       waveshare_rgb_lcd_bl_off()==ESP_OK) {
+        power_activity.asleep=true;
+        power_activity.sleep_pending=false;
+        controller_splash_hide();
     }
 }
 static void power_ui_change(int battery,int usb,int mode) {
@@ -868,6 +875,10 @@ static void power_process(void) {
                 power_battery=reset ? default_battery : (unsigned)change.battery;
                 power_usb=reset ? default_usb : (unsigned)change.usb;
                 power_mode=change.mode; power_activity.last_touch=lv_tick_get();
+                if(power_activity.sleep_pending) {
+                    power_activity.sleep_pending=false;
+                    controller_splash_hide();
+                }
                 if(power_timeout(power_battery,power_usb,power_mode)==0 && power_activity.asleep && waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
             }
             controller_ui_power(&ui,power_battery,power_usb,power_mode,err==ESP_OK?"Saved locally":"Save failed - retry");
@@ -1241,11 +1252,6 @@ static void update_now_playing(void) {
         controller_ui_set_artwork(&ui,art_result_id,art_result,8+288*288*2);
         free(art_result); art_result=NULL;
     }
-    if (backdrop_result || backdrop_clear) {
-        if (backdrop_result_generation == backdrop_generation)
-            controller_ui_set_backdrop(&ui,backdrop_clear ? NULL : backdrop_result,8+480*800*2);
-        free(backdrop_result); backdrop_result=NULL; backdrop_clear=false;
-    }
     lv_label_set_text(provider_save_status, provider_feedback);
 }
 static void build_queue_view(void) {
@@ -1458,77 +1464,6 @@ static void provider_icon_worker(void *unused) {
     }
 }
 
-static esp_err_t backdrop_http_event(esp_http_client_event_t *event) {
-    if(event->event_id==HTTP_EVENT_ON_HEADER && event->header_key && event->header_value &&
-       !strcasecmp(event->header_key,"ETag"))
-        snprintf((char *)event->user_data,96,"%s",event->header_value);
-    return ESP_OK;
-}
-/* Poll outside UI locks. An in-memory image survives temporary gateway outages. */
-static void backdrop_worker(void *unused) {
-    (void)unused;
-    char etag[96]="";
-    for(;;) {
-        vTaskDelay(pdMS_TO_TICKS(15000));
-        if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) continue;
-        bool fetch=backdrop_requested && ready;
-        bool loaded=ui.backdrop_loaded;
-        unsigned generation=backdrop_generation;
-        xSemaphoreGive(state_mutex);
-        if(!fetch) { etag[0]=0; continue; }
-        const char *rest=NULL,*scheme=NULL;
-        if(!strncmp(url,"ws://",5)) { rest=url+5; scheme="http://"; }
-        else if(!strncmp(url,"wss://",6)) { rest=url+6; scheme="https://"; }
-        else continue;
-        char endpoint[320]; snprintf(endpoint,sizeof(endpoint),"%s%s",scheme,rest);
-        char *suffix=strrchr(endpoint,'/');
-        if(!suffix || strcmp(suffix,"/ws")) continue;
-        snprintf(suffix,sizeof(endpoint)-(suffix-endpoint),"/backdrop");
-        char next_etag[96]="";
-        esp_http_client_config_t config={.event_handler=backdrop_http_event,.user_data=next_etag,.url=endpoint,.timeout_ms=10000,
-            .crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true};
-        esp_http_client_handle_t client=esp_http_client_init(&config);
-        if(!client) continue;
-        if(etag[0] && loaded) esp_http_client_set_header(client,"If-None-Match",etag);
-        unsigned char *data=NULL; int received=0,status=0;
-        enum { BYTES=8+480*800*2 };
-        if(esp_http_client_open(client,0)==ESP_OK) {
-            int64_t length=esp_http_client_fetch_headers(client);
-            status=esp_http_client_get_status_code(client);
-            if(status==200 && length==BYTES) {
-                data=heap_caps_malloc(BYTES,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                while(data && received<BYTES) {
-                    int count=esp_http_client_read(client,(char *)data+received,BYTES-received);
-                    if(count<=0) break;
-                    received+=count;
-                }
-
-            }
-        }
-        esp_http_client_close(client); esp_http_client_cleanup(client);
-        bool valid=data && received==BYTES && !memcmp(data,"MCBG\xe0\x01\x20\x03",8);
-        if((valid || status==204) && xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))==pdTRUE) {
-            if(backdrop_requested && generation==backdrop_generation) {
-                free(backdrop_result); backdrop_result=data; data=NULL;
-                backdrop_clear=status==204; backdrop_result_generation=generation; screen_dirty=true;
-                snprintf(etag,sizeof(etag),"%s",valid ? next_etag : "");
-            }
-            xSemaphoreGive(state_mutex);
-        }
-        free(data);
-    }
-}
-static void save_backdrop(bool enabled) {
-    if(xSemaphoreTake(state_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return;
-    backdrop_requested=enabled; backdrop_generation++;
-    if(!enabled) controller_ui_set_backdrop(&ui,NULL,0);
-    xSemaphoreGive(state_mutex);
-    nvs_handle_t n;
-    if(nvs_open("controller",NVS_READWRITE,&n)!=ESP_OK) return;
-    if(nvs_set_u8(n,"ui_backdrop",enabled)==ESP_OK) nvs_commit(n);
-    nvs_close(n);
-}
-
 static void save_theme(unsigned palette, bool light) {
     nvs_handle_t n;
     if (nvs_open("controller", NVS_READWRITE, &n) != ESP_OK) return;
@@ -1544,7 +1479,6 @@ static void init_screen(void) {
     controller_ui_create(&ui, now_screen, dock_action, open_players, open_providers,
                          back_clicked, save_providers_clicked);
     ui.theme_cb = save_theme;
-    ui.backdrop_cb = save_backdrop;
     ui.power_cb=power_ui_change;
     controller_ui_power(&ui,power_battery,power_usb,power_mode,"Auto uses battery; USB detection unavailable");
     power_activity.last_touch=lv_tick_get();
@@ -1558,16 +1492,13 @@ static void init_screen(void) {
     }
     lv_timer_create(power_tick,100,NULL);
     nvs_handle_t appearance;
-    uint8_t palette = 0, light = 0, backdrop = 0;
+    uint8_t palette = 0, light = 0;
     if (nvs_open("controller", NVS_READONLY, &appearance) == ESP_OK) {
         nvs_get_u8(appearance, "ui_palette", &palette);
         nvs_get_u8(appearance, "ui_light", &light);
-        nvs_get_u8(appearance, "ui_backdrop", &backdrop);
         nvs_close(appearance);
     }
     controller_ui_set_theme(&ui, palette, light == 1);
-    backdrop_requested=backdrop==1;
-    controller_ui_enable_backdrop(&ui,backdrop_requested);
     players_list = ui.players_list;
     providers_list = ui.providers_list;
     provider_save_status = ui.provider_feedback;
@@ -1605,11 +1536,7 @@ void app_main(void) {
     loading_presented=xSemaphoreCreateBinary();
     ESP_ERROR_CHECK(loading_presented ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(lvgl_port_lock(2000) ? ESP_OK : ESP_ERR_TIMEOUT);
-    lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x101b19),0);
-    lv_obj_t *loading=lv_label_create(lv_scr_act());
-    lv_label_set_text(loading,"Loading...");
-    lv_obj_set_style_text_color(loading,lv_color_hex(0xf0f5ed),0);
-    lv_obj_center(loading);
+    controller_splash_show(true);
     lv_timer_t *reveal=lv_timer_create(reveal_loading_frame,1,NULL);
     ESP_ERROR_CHECK(reveal ? ESP_OK : ESP_ERR_NO_MEM);
     lvgl_port_unlock();
@@ -1626,6 +1553,7 @@ void app_main(void) {
     if (lvgl_port_lock(2000)) {
         lv_obj_clean(lv_scr_act());
         init_screen();
+        controller_splash_hide();
         lv_obj_invalidate(lv_scr_act());
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
@@ -1639,7 +1567,6 @@ void app_main(void) {
     }
     if (err != ESP_OK) { status("NVS initialisation failed"); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
-    ESP_ERROR_CHECK(xTaskCreate(backdrop_worker,"backdrop",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(xTaskCreate(provider_icon_worker,"provider-icons",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(xTaskCreate(artwork_worker,"artwork",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(esp_netif_init());

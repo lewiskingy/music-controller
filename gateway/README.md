@@ -108,31 +108,16 @@ After `gateway/ready`, the gateway emits `gateway/capabilities` advertising `see
 
 The [protocol contract](../contracts/music-assistant.md) gives bounds, packet format and routing. These changes retain PR #614's mocked acceptance tests; live provider/device validation is still pending. If you use an existing reverse proxy rather than this example, add the artwork route as well as the device WebSocket route.
 
-### Optional controller backdrop
+### Device splash image
 
-Open `/backdrop` on the gateway, or `/controller/backdrop` through the example
-Caddy frontend. This trusted-LAN page requires no login. Upload JPEG, PNG or WebP
-(up to 8 MiB and 4 megapixels), preview the centre crop, set brightness (10–70%,
-default 35%), disable it without deleting it, or remove it. Uploading enables the
-image at the gateway. Each portrait controller must also enable **Settings →
-Backdrop: gateway**; its colour palette and Light/Dark choice remain independent.
-
-The gateway persists one normalized image and its settings in
-`CONTROLLER_BACKDROP_STATE` (default `/data/backdrop.json`). Compose mounts the
-`gateway_data` volume there; custom deployments must provide a writable persistent
-`/data` mount for UID 10001. The Docker image creates that directory with the
-correct ownership. To seed a local image, mount it read-only and set
-`CONTROLLER_BACKDROP_FILE=/path/to/image.jpg`; it is imported only when no persisted
-state exists. Subsequent uploads and removal take precedence over that seed.
-
-`GET /device/backdrop` returns a fixed 480 × 800 RGB565 packet: `MCBG`, little-endian
-16-bit width/height, then little-endian pixels (768008 bytes total). The image is
-already darkened. ETag supports conditional refresh; 204 means disabled or absent.
-The firmware polls every 15 seconds off the UI thread, caches in PSRAM for the
-current boot, persists the opt-in in NVS, and retains the image during temporary
-network failures. Disabling/removing at the gateway clears clients on their next
-successful poll. A reboot needs one successful fetch; no image is written to flash.
-Older gateways and failed downloads leave the plain palette available.
+Boot and pre-sleep images are bundled with the firmware. The optional uploaded
+background feature and its routes have been removed; normal screens use their
+selected colour palette. Existing `CONTROLLER_BACKDROP_STATE` and
+`CONTROLLER_BACKDROP_FILE` configuration is ignored, and old saved image files
+are no longer read. The persistent `/data` mount remains needed for provider
+logo overrides. Consumers can remove obsolete `/controller/backdrop*` and
+`/controller/device/backdrop` proxy rules on their next deployment. The firmware
+splash works with existing gateways and requires no release-pin change.
 
 ### Controller settings
 
@@ -153,7 +138,7 @@ re-register after reconnect; gateway restarts require no preference recovery.
 The example Caddyfile routes `/controller/settings*` to `/settings*`; add the same
 LAN-only route to custom/Atlas reverse proxies. Writes require a same-host browser
 Origin (including Tailscale hostnames), or the configured `CONTROLLER_ORIGIN`.
-Reads/page access use the same trusted-LAN deployment model as the backdrop page.
+Reads/page access use the trusted-LAN deployment model.
 
 ### Provider logos
 

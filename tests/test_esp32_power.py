@@ -27,6 +27,18 @@ int main(void) {
     /* Unsigned elapsed time survives the LVGL tick counter wrapping. */
     p.last_touch=UINT32_MAX-100;
     assert(!power_expired(&p,100,1)); assert(power_expired(&p,1000,1));
+    /* Splash dwell begins after presentation; no early backlight off. */
+    p=(power_activity_t){.last_touch=100};
+    assert(power_expired(&p,30100,30));
+    power_begin_sleep(&p,30200);
+    assert(!power_expired(&p,99999,30));
+    assert(!power_sleep_ready(&p,32199)); assert(power_sleep_ready(&p,32200));
+    /* Touch during the splash cancels sleep and consumes the whole gesture. */
+    assert(power_touch(&p,31000,true)); assert(!p.sleep_pending);
+    assert(power_suppress(&p,true)); assert(power_suppress(&p,false));
+    assert(!power_suppress(&p,false)); assert(!power_sleep_ready(&p,40000));
+    power_begin_sleep(&p,UINT32_MAX-1000);
+    assert(!power_sleep_ready(&p,998)); assert(power_sleep_ready(&p,999));
     return 0;
 }
 ''')

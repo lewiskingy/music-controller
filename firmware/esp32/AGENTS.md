@@ -31,7 +31,7 @@ before relying on driver behavior; do not assume newer documentation applies.
   presentation. Do not force intermediate refreshes during a transition.
 - `lv_refr_now` must run on the BSP LVGL task: the flush waits for that task's
   VSYNC notification. Holding the mutex on another task is insufficient.
-- Keep a minimal Loading page visible while preparing the initial main frame.
+- Keep the bundled Loading splash visible while preparing the initial main frame.
   Later transitions retain the previous frame until the replacement is ready.
   Do not wait for network access or artwork before showing useful startup UI.
 
@@ -93,6 +93,6 @@ responses and unnecessary redraws, rather than merely mirror implementation text
 
 Native acceptance cannot prove physical VSYNC, RGB DMA bandwidth, touch alignment,
 battery behavior or TLS memory headroom. Identify hardware checks still needed:
-cold boot, offline startup, navigation/dialogs, typing/search, track/artwork/backdrop
-changes, stopped/playing idle, sleep/wake and network reconnection. Keep physical
-acceptance claims separate from compilation and simulator results.
+cold boot, offline startup, navigation/dialogs, typing/search, track/artwork
+changes, boot/sleep splash, stopped/playing idle, sleep/wake and network
+reconnection. Keep physical acceptance claims separate from compilation and simulator results.
