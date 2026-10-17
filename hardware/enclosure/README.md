@@ -8,9 +8,11 @@ Mechanical design for the **original Waveshare ESP32-S3-Touch-LCD-4.3**, with sp
 
 ![Raised rear battery compartment](previews/rear.png)
 
-## Branch scope
+## Firmware and buying requirements
 
-This hardware branch targets `main` independently of PR20 (`feature/rich-portrait-ui`). It does not contain the portrait firmware changes. The mechanical orientation supports the portrait UI; firmware rotation and touch alignment still need device acceptance.
+The current firmware uses the portrait orientation this case is designed for. Confirm rotation and touch alignment on the board before final assembly. See the [hardware buying guide](../../docs/hardware.md) for the exact supported board, USB-only operation and optional battery requirements.
+
+For downloads, use the successful **Enclosure CAD and renders** run's `controller-enclosure-<commit>` artifact and extract `print-package.zip`, or a separately tagged enclosure release when available. Detailed instructions are below.
 
 ## Source and deliverables
 

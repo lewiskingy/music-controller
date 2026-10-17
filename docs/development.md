@@ -29,7 +29,7 @@ The firmware guide documents the real ESP-IDF v5.4.2 build. Python source-contra
 | A component's workflow YAML | That workflow only |
 | General README/docs/hardware documentation | No component build |
 
-Component `.md` files are also excluded from build triggers. Manual dispatch runs the chosen workflow regardless of paths. GitHub push path filters compare the push's changed files; PR filters compare the PR diff. A combined firmware+gateway change naturally runs both. The separate tag/manual prototype release workflow intentionally runs only when a release is requested, independent of ordinary commit filters.
+Component `.md` files are also excluded from build triggers. Manual dispatch runs the chosen workflow regardless of paths. GitHub push path filters compare the push's changed files; PR filters compare the PR diff. A combined firmware+gateway change naturally runs both. The unified tag release workflow runs firmware, installer and gateway validation before publishing; enclosure tags use their separate workflow.
 
 Workflow path filters can leave required checks pending when a workflow is skipped. Do not make each path-filtered workflow an unconditional required branch-protection check; if you need a universal merge gate later, add an always-running aggregate that accepts intentionally skipped components. Repository protection settings are not changed here.
 
@@ -39,6 +39,12 @@ Give new tests a component-specific directory and include it in that workflow's 
 
 ## Releases and deployment
 
-Firmware CI uploads checksummed binaries and a merged USB flash image as Actions artifacts. Gateway CI builds/tests an image but does not publish it; consumers can build from a pinned checkout. The `vX.Y.Z` workflow publishes the browser prototype archive/checksum only. A gateway-only merge neither builds firmware nor publishes a prototype release.
+New `vX.Y.Z` tags use `.github/workflows/release-prototype.yml` (named **Release Music Controller**) to build firmware and Windows GUI/CLI installers, test/build the gateway, and publish the per-profile flash binaries, release manifest, checksums, prototype archive and gateway source archive together. The installer only offers compatible manifest-bearing releases. See [installer release details](../installer/README.md#releases-and-atlas).
 
-Existing Atlas deployment still uses its original gateway source. Updating Atlas to consume this repository is explicitly outside this change.
+Firmware CI also uploads Actions artifacts, including a merged USB flash image. Their filenames/package layout differ from tagged release assets. Gateway CI does not publish a registry image; consumers build from a pinned source tag. Preserve gateway environment and volumes during deployment. Explain in release notes which components changed and whether an updated gateway is required before firmware.
+
+Historical `gateway-v…` tags remain valid; new unified releases use the main version tag. Enclosure `enclosure-v…` tags publish independent print packages/renders. Ordinary component commits do not publish releases or deploy Atlas. Atlas is a separate consumer whose release pin is managed in its own repository.
+
+## Engineering records
+
+[Historical firmware milestones and investigations](firmware-history.md) retain context for older fixes. Current operator instructions live in the firmware/installer guides; current required engineering rules live in [AGENTS.md](../AGENTS.md) and [firmware AGENTS.md](../firmware/esp32/AGENTS.md). Do not append another obsolete installation sequence to an implementation record.

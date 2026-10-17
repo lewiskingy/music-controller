@@ -1,71 +1,62 @@
 # Music Controller
 
-A shared household touchscreen remote for [Music Assistant](https://www.music-assistant.io/). Select an output player, see what is playing and control music without opening a phone app. The target device is a Waveshare ESP32-S3 4.3-inch 800×480 capacitive touchscreen.
+A dedicated household touchscreen remote for [Music Assistant](https://www.music-assistant.io/). Choose a player, browse or search music, and control playback without opening a phone app.
 
-This repository contains the **ESP32 firmware, required backend gateway and browser UX prototype**. You can build and run them with your own Music Assistant server; Atlas is one deployment, not a prerequisite.
+The controller runs on a supported ESP32 touchscreen. It controls your existing speakers/players through Music Assistant; audio travels from Music Assistant to those players. The controller and gateway do not play or relay audio.
 
-## Install on Windows
+**[Start here: hardware to first playback →](docs/getting-started.md)** · [Download Windows installer](https://github.com/lewiskingy/music-controller/releases/latest/download/music-controller-setup.exe) · [Releases](https://github.com/lewiskingy/music-controller/releases)
 
-Download **music-controller-setup.exe** from the [latest release](https://github.com/lewiskingy/music-controller/releases/latest) to update an existing controller or provision a new device. The executable bundles Python and the flashing tools; ESP-IDF is not required on the installing PC. See [installation, gateway keys and release versioning](installer/README.md). Installer assets become available with the first release containing this workflow.
+## What is included?
 
-## What works today
-
-| Part | Current capabilities |
+| Component | What you get |
 | --- | --- |
-| ESP32 firmware | LCD/touch, Wi-Fi, certificate-verified WSS, live player/queue metadata, player selection, playback controls, 5% volume stepping, provider discovery and selection saved to NVS |
-| Gateway | Server-side Music Assistant login, device/browser admission checks, validated playback/seek commands, stable queue playback, compact Browse/Search adapters, authenticated RGB565 artwork and live event relay |
-| Browser prototype | Now Playing, player selection, transport, volume, queue selection and catalogue browsing; an interaction prototype rather than ESP32 firmware |
+| [ESP32 firmware](firmware/esp32/README.md) | Portrait 480×800 touch UI: Now Playing, player/provider selection, artwork, Queue, Browse, Search, playback/seek/volume controls, colour preferences and backlight power saving |
+| [Dedicated gateway](gateway/README.md) | Required service connecting the controller to Music Assistant, including authentication, artwork conversion, device settings and provider-logo overrides |
+| [Windows installer](installer/README.md) | Prebuilt firmware installation and initial Wi-Fi/gateway configuration; updates preserve settings |
+| [Case and dock designs](hardware/enclosure/README.md) | Printable STL/STEP designs, renders and assembly instructions; first-fit prototype, not yet physically validated |
+| [Browser prototype](docs/prototype.md) | Optional older landscape interaction prototype; not a preview of every current firmware feature |
 
-Native artwork, Queue/Browse/Search screens, provider-filtered browsing/search, power management and OTA delivery remain follow-up work on the current main branch. This gateway also includes the support required by the unmerged [portrait firmware PR #20](https://github.com/lewiskingy/music-controller/pull/20), copied from [Atlas PR #614](https://github.com/lewiskingy/atlas/pull/614); merging the gateway does not itself add those native UI features. The browser Search view is a placeholder. Provider selection on the device does not yet filter catalogue requests. Sonos Pause is disabled while playing because of observed queue hopping; Stop is available.
+## What do I need?
 
-## Architecture
-
-The ESP32 and browser connect to the gateway. It authenticates to Music Assistant using a dedicated account and forwards only supported commands and state/events. Music Assistant owns providers, catalogue, queues, audio streaming and output-player integration. Audio goes from Music Assistant to the player, not through this gateway or the ESP32.
-
-Music Assistant credentials stay on the gateway host. The ESP32 receives a separate device token; Wi-Fi settings, endpoint and token are provisioned locally into NVS. An HTTPS reverse proxy terminates TLS for the device and serves the browser prototype on the same origin as its WebSocket endpoint.
-
-See [architecture](docs/architecture.md) and the [gateway protocol contract](contracts/music-assistant.md).
-
-## Repository contents
-
-
-| Path | Purpose and usage |
+| Requirement | Details |
 | --- | --- |
-| [gateway/](gateway/README.md) | Python/aiohttp gateway, Dockerfile, Compose example, optional Caddy frontend, environment template and integration tests |
-| [firmware/esp32/](firmware/esp32/README.md) | ESP-IDF/LVGL application, board dependencies, partitions and local NVS provisioning tool; build/flash the physical controller |
-| [prototype/](docs/prototype.md) | Static HTML/CSS/JavaScript controller; inspect the touch UX or use it with the gateway |
-| [contracts/](contracts/music-assistant.md) | Shared authentication, requests, responses and supported command boundary |
-| [docs/](docs/architecture.md) | Architecture, hardware, browser operation and development/CI guidance |
-| [hardware/](hardware/README.md) | Hardware direction and specifications |
-| [hardware/enclosure/](hardware/enclosure/README.md) | Printable portrait enclosure/dock CAD, assembly guide, geometry checks and independent build/render workflow |
-| tests/test_esp32*.py | Firmware source-contract checks; CI also builds the real ESP-IDF application |
-| tests/prototype/ | Browser single-screen/layout contract checks |
-| .github/workflows/ | Separate firmware, gateway and prototype checks, plus enclosure CAD checks and explicit tagged prototype/hardware releases |
+| Supported touchscreen | **Original Waveshare ESP32-S3-Touch-LCD-4.3**, 800×480 capacitive GT911, 16 MB flash / 8 MB PSRAM. Current firmware supports this board only; 4.3B/C, industrial and 4-inch models are not interchangeable. [Buying guide](docs/hardware.md) |
+| Power and flashing | USB data cable, suitable USB power supply, and a Windows x64 computer for the packaged installer. Manual flashing/build instructions are available for other systems. |
+| Battery | **Optional** for portable operation; USB-powered operation needs no battery. Use a compatible protected single-cell 3.7 V LiPo with verified polarity and charging suitability. [Battery and case requirements](docs/hardware.md#battery-and-enclosure) |
+| Music Assistant | A working installation on your network, configured music providers, at least one working output player, and a dedicated non-admin account for the gateway |
+| Gateway host | An always-running network host with Docker Compose v2, able to reach Music Assistant; it may share the Music Assistant host |
+| Network frontend | Wi-Fi access to the gateway through trusted HTTPS/WSS, with working DNS and a certificate trusted by the firmware. [Network setup](docs/getting-started.md#3-configure-dns-and-trusted-https) |
 
-## Set up your own system
+You do not need Atlas, this author's domain, a Home Assistant installation specifically, or ESP-IDF to use the Windows installer. You do need to deploy the gateway yourself; the installer does not install backend services.
 
-1. Have a working Music Assistant server and at least one output player. Create a dedicated non-admin Music Assistant user for the controller.
-2. Follow [gateway setup](gateway/README.md): copy `.env.example`, configure your server/account, generate a device token, and build/start the gateway. Supply a trusted HTTPS/WSS frontend for a physical device.
-3. Follow [firmware installation](firmware/esp32/README.md): build or download a successful Actions artifact, provision your Wi-Fi, **your** gateway WSS URL and the matching device token, then flash firmware followed by private NVS.
-4. Optionally use the [browser prototype](docs/prototype.md) through the example same-origin frontend.
+## Setup overview
 
-No Atlas checkout, Atlas secrets path, deployment script or home domain is required. Existing Atlas deployment stays unchanged by this migration.
+1. [Choose hardware](docs/hardware.md); start with USB power before assembling a case or connecting a battery.
+2. [Prepare Music Assistant](docs/getting-started.md#1-prepare-music-assistant) and verify playback on your chosen speaker/player.
+3. [Deploy the gateway](docs/getting-started.md#2-deploy-the-gateway), configure its Music Assistant account and generate a separate controller key.
+4. [Configure trusted HTTPS/WSS](docs/getting-started.md#3-configure-dns-and-trusted-https) reachable from the controller's Wi-Fi.
+5. [Install firmware](docs/getting-started.md#4-install-and-configure-the-controller) with Wi-Fi settings, your gateway URL and the matching controller key.
+6. [Verify first playback](docs/getting-started.md#5-verify-first-playback), set preferences, then optionally assemble the case.
 
-## Fundamental UX principle — one focused screen
+## Current limits
 
-Design for a strict **800 × 480** landscape viewport: Now Playing, Players, Providers, Queue, Browse or Search replaces the previous primary screen. The outer page/device never scrolls; only bounded lists scroll. Keep controls touch-friendly with one obvious way back. Apply this principle to both the prototype and native firmware.
+- Automatic USB/battery power detection is unresolved. Auto uses the battery timeout; select USB/external manually for a permanently powered controller.
+- Power saving switches off the backlight, not the whole device. Battery runtime has not been established.
+- Sonos Pause is disabled while playing because of observed queue hopping; use Stop.
+- Updates use USB; wireless OTA delivery is not implemented.
+- No specific Music Assistant version is currently certified; verify the installed server and providers using the setup checklist.
+- The enclosure and optional contact-charging dock require physical fit/electrical validation. USB-only assembly is the simplest starting point.
 
-## Development, tests and releases
+## Documentation
 
-See [development and CI](docs/development.md) for commands and the change-to-workflow matrix. Gateway-only commits do not build ESP firmware; firmware-only commits do not build the gateway. Shared `contracts/` changes run all three component checks. Tagged `vX.Y.Z` releases package the static browser prototype only; firmware Actions artifacts and the locally built gateway container are separate outputs.
+[Getting started](docs/getting-started.md) · [Hardware](docs/hardware.md) · [Gateway deployment](gateway/README.md) · [Firmware/manual installation](firmware/esp32/README.md) · [Windows installer](installer/README.md) · [Case assembly](hardware/enclosure/ASSEMBLY.md) · [Troubleshooting](docs/troubleshooting.md)
 
-Keep `.env` and `controller-nvs.bin` private. The browser origin check is not user authentication: deploy the controller on a trusted LAN and restrict access there. Never expose the example frontend or Music Assistant ports through public router forwarding.
+For implementation details: [architecture](docs/architecture.md), [protocol](contracts/music-assistant.md), [development and releases](docs/development.md), and [firmware engineering history](docs/firmware-history.md).
 
-Originating initiative: [Atlas #577](https://github.com/lewiskingy/atlas/issues/577).
+Keep `.env`, controller keys and private NVS binaries private. Deploy on a trusted LAN; the example browser/settings frontend is not a public authenticated service.
 
-### Firmware display rendering
+## Contributing
 
-The ESP32 UI uses VSYNC-synchronized buffered presentation for all updates, with
-whole-frame navigation and dirty-region control feedback. Startup shows a minimal Loading page while the main UI is prepared off-screen. See the firmware README's
-[rendering rules and hardware acceptance](firmware/esp32/README.md#buffered-presentation-and-startup-loading-page)
-before changing display, transition or refresh code.
+Bug reports, improvements and hardware testing are welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** before starting.
+
+**Using an AI coding agent? It must read [AGENTS.md — required repository instructions](AGENTS.md) before making changes, plus any AGENTS.md instructions in the directories it modifies.**

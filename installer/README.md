@@ -1,5 +1,7 @@
 # Windows installer
 
+New installation? Follow [Getting Started](../docs/getting-started.md) first to prepare Music Assistant, deploy the gateway, and configure trusted HTTPS. This installer flashes/configures the physical controller; it does not install backend services.
+
 Download **music-controller-setup.exe** from the [latest release](https://github.com/lewiskingy/music-controller/releases/latest). Windows x64 is the initial supported platform. No Python, ESP-IDF, source checkout or firmware compilation is needed. Network access is required to fetch releases. The executable is currently unsigned, so Windows may show a SmartScreen prompt. Install the board's USB driver if no port appears.
 
 Permanent download: https://github.com/lewiskingy/music-controller/releases/latest/download/music-controller-setup.exe
@@ -14,7 +16,7 @@ Permanent download: https://github.com/lewiskingy/music-controller/releases/late
 
 New-device setup erases **all** flash, including existing settings and storage. Updates are USB operations, not wireless OTA. A failed/interrupted write may require another USB flash. USB identifies the chip/port but cannot identify the attached display: verify the hardware profile yourself.
 
-Only releases with `release-manifest.json` appear in the picker. Older firmware-only/prototype releases and historical `gateway-v…` releases are not compatible. The first new release after this change supplies the executable and manifest.
+Only releases with `release-manifest.json` appear in the picker. Older firmware-only/prototype releases and historical `gateway-v…` releases are not compatible. Release v0.5.0 supplies the executable and manifest; use a compatible stable release.
 
 ## Gateway key
 

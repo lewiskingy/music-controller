@@ -3,8 +3,7 @@
 These notes describe the earlier Atlas deployment and acceptance work, not the
 current installation procedure. For a new deployment use [gateway setup](../gateway/README.md),
 [browser guide](prototype.md) and [firmware guide](../firmware/esp32/README.md).
-The gateway is now also present in this repository; the Atlas implementation
-remains unchanged.
+This is a historical snapshot. Current gateway source and deployment ownership are described in [architecture](architecture.md); use [Getting Started](getting-started.md) for a new installation.
 
 ## Tested integration baseline (Atlas, October 2026)
 
