@@ -2,16 +2,30 @@
 
 ## What happens after a merge?
 
-Every push to `main` (including a merged documentation PR) runs **Prepare draft release**. It runs the reusable firmware contracts/native UI acceptance/ESP-IDF build, Windows installer tests/build/self-test, gateway tests/container checks and browser checks. After all pass it creates a complete **draft release and an actual version tag at that tested commit**. A failed build creates neither a new draft nor a new tag.
+Every push to `main` runs **Prepare draft release**. Firmware contracts/native
+UI acceptance/ESP-IDF build, Windows installer tests/build/self-test, gateway
+tests/container checks and browser checks must all pass before remote release
+changes begin.
 
-Automatic versions increment the patch above the highest existing `vMAJOR.MINOR.PATCH` tag, including tags for unpublished drafts. For example, tags `v0.5.0` and draft `v0.5.1` lead to `v0.5.2`. Separate `gateway-v…`, `enclosure-v…` and prerelease tags do not affect that numbering. This deliberately favors a predictable default over inferring semantic versions from PR titles.
+There is one **rolling draft** for main. Each successful merge refreshes its
+assets, generated release notes and version tag to that tested commit. Until
+publication, that draft and tag are mutable: identify test results by commit SHA,
+not just the draft version. Failed component builds leave the previous candidate
+unchanged. Release runs are serialized.
 
-Each draft keeps its own tag and assets; subsequent merges create new drafts, not replacements. Older drafts remain available until a maintainer deletes them. Review version choice before publishing; if a minor/major bump is appropriate, use the manual override below rather than renaming a prepared draft (its manifest and filenames contain the version). The workflow serializes release runs with a queue; it does not cancel an active build on a later merge.
+If several older drafts exist, the workflow keeps the highest stable-form draft
+newer than the latest published version and removes superseded drafts only after
+the replacement has uploaded successfully. Their old tags remain for reference.
+Other tag families, such as `gateway-v…`, are left alone.
+
+Publishing freezes the version and assets. The next main build creates the next
+patch above all existing stable-form tags. For example, an unpublished v0.5.2
+keeps receiving merges; after publication, the next candidate is v0.5.3.
 
 ## Review and promote a draft
 
 1. Sign in with repository write access and open [Releases](https://github.com/lewiskingy/music-controller/releases). Drafts are visible to maintainers, not ordinary public download clients.
-2. Select the draft for the desired merge. The Actions run summary links to it and identifies its commit. Check that it contains the assets below and review/edit generated release notes, including compatibility and required deployment order.
+2. Select the active rolling draft. The Actions run summary links to it and identifies its commit. Wait for the release workflow to finish before promoting it. Check that it contains the assets below and review/edit generated release notes, including compatibility and required deployment order.
 3. Test the firmware/gateway as appropriate. Download the draft's merged full-flash image or the workflow's firmware artifact for manual device testing, using the [firmware guide](../firmware/esp32/README.md). Full flashing can overwrite NVS; preserve/restore private settings. You can build the gateway from its tagged source.
 4. Edit the draft. Leave **This is a pre-release** unchecked for a stable release, select **Set as latest release**, then **Publish release**.
 
@@ -38,10 +52,30 @@ Use **Releases → version → Assets** for durable released downloads. Actions 
 
 ## Manual preparation, retries and safeguards
 
-In **Actions → Prepare draft release → Run workflow**, select `main`. Leave version blank for the next patch, or specify an unused stable-form version such as `v0.6.0`. This builds that main commit. Pushing a manually chosen `vX.Y.Z` tag also prepares a draft, never an automatic public release.
+In **Actions → Prepare draft release → Run workflow**, select `main`.
+Leave version blank to refresh the active draft (or start the next patch).
+An unused explicit version such as `v0.6.0` starts that candidate instead;
+older drafts are removed after successful preparation. Do not rename prepared
+drafts manually: manifests and archive names contain the version.
 
-Re-running a successful commit reuses its existing stable-form tag. A retry can repair an incomplete draft, but refuses a tag pointing to another commit and never replaces assets of a published release. If a manual run requests an explicit new version at the same commit, that version is used. Existing published releases remain untouched.
+Main may move only a tag belonging to an existing unpublished draft. Published
+releases are never changed, and an older workflow retry cannot move a candidate
+backward to an ancestor or divergent commit. If the draft was published while a
+build was running, preparation fails safely; run main again for the next version.
+Do not publish while the workflow is refreshing the candidate.
 
-Tags are created only after validation and complete bundle verification. If GitHub fails between tag creation and draft upload, the tag can exist without a complete draft; rerun that failed workflow to repair it. Do not move existing release tags. The workflow uses the repository `GITHUB_TOKEN` with write access only in the final draft job; no personal token or new secret is needed. Repository/organization rules restricting tag creation or release writes must allow this workflow's token.
+Manual stable tag pushes retain fixed-commit preparation and reject tag
+collisions; they do not refresh or clean up main's rolling draft.
+
+All component builds and local bundle verification finish before tag or asset
+writes. Remote tag updates and asset uploads are separate GitHub operations, not
+an atomic transaction. An upload/API failure can leave an incomplete draft;
+rerun the failed workflow to repair it before publishing. Superseded drafts are
+retained until upload and notes refresh succeed.
+
+The workflow uses the repository `GITHUB_TOKEN`, with read access to select
+private drafts and write access only in the final draft job. No personal token
+or new secret is needed. Repository/organization rules must permit updating
+unpublished candidate tags and writing draft releases.
 
 Implementation: [release workflow](../.github/workflows/release-prototype.yml), [release helper](../scripts/prepare_release.py), [tests](../tests/release/test_prepare_release.py). Creating the tag and uploading assets happen in the same workflow, so tag-trigger recursion is not required.

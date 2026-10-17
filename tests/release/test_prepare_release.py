@@ -91,7 +91,7 @@ def test_prepare_never_publishes_or_changes_an_existing_published_release(bundle
         if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
             return 'other-sha' if state == 'collision' else 'source-sha'
         if args[:4] == ('gh', 'api', '--paginate', '--slurp'):
-            return json.dumps([[] if state == 'new' else [dict(tag_name='v0.5.1', draft=state == 'draft', html_url='https://example/release')]])
+            return json.dumps([[] if state == 'new' else [dict(tag_name='v0.5.1', draft=state in ['draft', 'collision'], html_url='https://example/release')]])
         return 'https://example/release'
 
     monkeypatch.setattr(release, 'run', fake_run)
@@ -109,3 +109,68 @@ def test_prepare_never_publishes_or_changes_an_existing_published_release(bundle
         assert len(writes) == 2
         assert 'ref=refs/tags/v0.5.1' in writes[0] and 'sha=source-sha' in writes[0]
         assert '--draft' in writes[1] and '--latest=false' in writes[1] and '--verify-tag' in writes[1]
+
+
+def test_rolling_reuses_highest_draft_then_allocates_after_publication():
+    tags = ['v0.5.0', 'v0.5.1', 'v0.5.2']
+    records = [dict(tag_name=t, draft=t != 'v0.5.0') for t in tags]
+    assert release.rolling_version(tags, [], records) == 'v0.5.2'
+    assert release.rolling_version(tags, [], records, 'v0.5.2') == 'v0.5.2'
+    records[-1]['draft'] = False
+    assert release.rolling_version(tags, ['v0.5.2'], records) == 'v0.5.3'
+    with pytest.raises(ValueError, match='newer than published'):
+        release.rolling_version(tags, [], records, 'v0.5.1')
+    assert release.rolling_version(tags, [], records, 'v0.6.0') == 'v0.6.0'
+
+
+@pytest.mark.parametrize('published,rollback,upload_fails', [(False, False, False), (True, False, False), (False, True, False), (False, False, True)])
+def test_rolling_refresh_and_cleanup_only_after_success(bundle, monkeypatch, published, rollback, upload_fails):
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
+    monkeypatch.delenv('GITHUB_STEP_SUMMARY', raising=False)
+    records = [
+        dict(id=10, tag_name='v0.5.0', draft=True),
+        dict(id=11, tag_name='v0.5.1', draft=not published, html_url='url'),
+        dict(id=12, tag_name='gateway-v1.0.0', draft=True),
+        dict(id=13, tag_name='v0.4.0', draft=False),
+    ]
+    calls = []
+    def fake_run(*args):
+        calls.append(args)
+        if args == ('git', 'rev-parse', 'HEAD'):
+            return 'new-sha'
+        if args == ('git', 'tag', '--list'):
+            return 'v0.5.0\nv0.5.1'
+        if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
+            return 'old-sha'
+        if args[:2] == ('git', 'merge-base'):
+            return 'other-sha' if rollback else 'old-sha'
+        if args[:4] == ('gh', 'api', '--paginate', '--slurp'):
+            return json.dumps([records])
+        if args[:3] == ('gh', 'api', 'repos/owner/repo/releases/generate-notes'):
+            return json.dumps(dict(body='Generated notes'))
+        if upload_fails and args[:3] == ('gh', 'release', 'upload'):
+            raise RuntimeError('Upload failed')
+        return 'url'
+    monkeypatch.setattr(release, 'run', fake_run)
+    if published or rollback:
+        with pytest.raises(ValueError):
+            release.prepare(bundle, 'v0.5.1', rolling=True)
+        assert not any('--method' in c or c[:2] == ('gh', 'release') for c in calls)
+        return
+    if upload_fails:
+        with pytest.raises(RuntimeError, match='Upload failed'):
+            release.prepare(bundle, 'v0.5.1', rolling=True)
+        assert not any('DELETE' in c for c in calls)
+        return
+    release.prepare(bundle, 'v0.5.1', rolling=True)
+    patch = next(i for i,c in enumerate(calls) if 'PATCH' in c)
+    upload = next(i for i,c in enumerate(calls) if c[:3] == ('gh', 'release', 'upload'))
+    edit = next(i for i,c in enumerate(calls) if c[:3] == ('gh', 'release', 'edit'))
+    delete = next(i for i,c in enumerate(calls) if 'DELETE' in c)
+    assert patch < upload < edit < delete
+    assert calls[delete][2] == 'repos/owner/repo/releases/10'
+    assert sum('DELETE' in c for c in calls) == 1
+    assert not any('--draft=false' in c for c in calls)
+    notes = next(c for c in calls if c[:3] == ('gh', 'api', 'repos/owner/repo/releases/generate-notes'))
+    assert 'previous_tag_name=v0.4.0' in notes
+    assert not (bundle / 'rolling-notes.md').exists()
