@@ -88,11 +88,6 @@ static void theme_clicked(lv_event_t *event) {
     if(ui->theme_cb) ui->theme_cb(palette,light);
 }
 
-static void backdrop_clicked(lv_event_t *event) {
-    controller_ui_t *ui = lv_event_get_user_data(event);
-    controller_ui_enable_backdrop(ui, !ui->backdrop_enabled);
-    if (ui->backdrop_cb) ui->backdrop_cb(ui->backdrop_enabled);
-}
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, unsigned color) {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_set_pos(obj, x, y);
@@ -534,9 +529,8 @@ void controller_ui_create(controller_ui_t *ui, lv_obj_t *root, ui_action_cb_t ac
         bg(ui->mode_buttons[i],ACCENT,LV_STATE_CHECKED);
         fg(ui->mode_buttons[i],BG,LV_STATE_CHECKED);
     }
-    ui->backdrop_button=button(ui->settings_content,"Backdrop: off",24,382,352,48,backdrop_clicked,ui);
-    ui->sources_button=button(ui->settings_content,"Music provider",24,442,352,40,providers_cb,NULL);
-    ui->power_button=button(ui->settings_content,"Screen power",24,488,352,40,power_open,ui);
+    ui->sources_button=button(ui->settings_content,"Music provider",24,390,352,56,providers_cb,NULL);
+    ui->power_button=button(ui->settings_content,"Screen power",24,458,352,56,power_open,ui);
     ui->power_panel=panel(root,0,0,UI_WIDTH,UI_HEIGHT,BG);
     label(ui->power_panel,"Screen power",24,24,432,TEXT,true);
     label(ui->power_panel,"Timeout seconds (0 = always on)",24,80,432,TEXT,false);
@@ -849,39 +843,4 @@ void controller_ui_provider_badges(controller_ui_t *ui,const char *selected,cons
         lv_img_set_src(ui->source_image,icon); lv_obj_clear_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(ui->source_badge);
     } else lv_obj_add_flag(ui->source_badge,LV_OBJ_FLAG_HIDDEN);
-}
-
-/* Gateway pixels are already cropped and darkened; retain the selected palette. */
-void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled) {
-    ui->backdrop_enabled=enabled;
-    bool visible=enabled && ui->backdrop_loaded;
-    lv_obj_set_style_bg_img_src(ui->root,visible ? &ui->backdrop_descriptor : NULL,0);
-    lv_style_set_bg_opa(&backgrounds[BG],visible ? LV_OPA_40 : LV_OPA_COVER);
-    lv_obj_report_style_change(&backgrounds[BG]);
-    if(ui->backdrop_button) label_text(lv_obj_get_child(ui->backdrop_button,0),enabled ? "Backdrop: gateway" : "Backdrop: off");
-}
-bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length) {
-    if(!packet) {
-        lv_obj_set_style_bg_img_src(ui->root,NULL,0);
-        lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
-#ifdef ESP_PLATFORM
-        free(ui->backdrop_pixels);
-#else
-        lv_mem_free(ui->backdrop_pixels);
-#endif
-        ui->backdrop_pixels=NULL; ui->backdrop_loaded=false;
-        controller_ui_enable_backdrop(ui,ui->backdrop_enabled); return true;
-    }
-    if(length!=8+UI_WIDTH*UI_HEIGHT*2 || memcmp(packet,"MCBG\xe0\x01\x20\x03",8)) return false;
-    if(!ui->backdrop_pixels) ui->backdrop_pixels=art_allocate(UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t));
-    if(!ui->backdrop_pixels) return false;
-    for(unsigned i=0;i<UI_WIDTH*UI_HEIGHT;i++) {
-        unsigned v=packet[8+i*2] | ((unsigned)packet[9+i*2]<<8);
-        ui->backdrop_pixels[i]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);
-    }
-    ui->backdrop_descriptor=(lv_img_dsc_t){.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=UI_WIDTH,.h=UI_HEIGHT},
-        .data_size=UI_WIDTH*UI_HEIGHT*sizeof(lv_color_t),.data=(const uint8_t *)ui->backdrop_pixels};
-    lv_img_cache_invalidate_src(&ui->backdrop_descriptor);
-    ui->backdrop_loaded=true; controller_ui_enable_backdrop(ui,ui->backdrop_enabled);
-    lv_obj_invalidate(ui->root); return true;
 }

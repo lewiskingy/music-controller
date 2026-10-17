@@ -71,11 +71,6 @@ typedef struct {
     lv_color_t *art_pixels;
     char art_id[65];
     bool art_loaded;
-    lv_obj_t *backdrop_button;
-    lv_img_dsc_t backdrop_descriptor;
-    lv_color_t *backdrop_pixels;
-    bool backdrop_enabled, backdrop_loaded;
-    void (*backdrop_cb)(bool enabled);
     lv_obj_t *power_button, *power_panel, *power_battery, *power_usb, *power_mode, *power_feedback;
     void (*power_cb)(int battery, int usb, int mode);
     ui_provider_icon_t provider_icons[UI_PROVIDER_ICONS];
@@ -118,9 +113,6 @@ void controller_ui_search(controller_ui_t *ui, const ui_media_item_t *items, uns
 /* Radio selection: clicking the selected row cannot clear it. */
 void controller_ui_choose_source(lv_obj_t *list, lv_obj_t *chosen);
 lv_obj_t *controller_ui_source_row(lv_obj_t *list,const char *name,bool selected);
-
-void controller_ui_enable_backdrop(controller_ui_t *ui, bool enabled);
-bool controller_ui_set_backdrop(controller_ui_t *ui, const unsigned char *packet, size_t length);
 
 void controller_ui_power(controller_ui_t *ui, int battery, int usb, int mode, const char *message);
 

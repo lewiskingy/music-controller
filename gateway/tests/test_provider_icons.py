@@ -68,7 +68,6 @@ def test_authenticated_gateway_icon_discovery_and_serving(tmp_path,monkeypatch,o
     import app as gateway
     monkeypatch.setattr(gateway,'DEVICE_TOKEN','device')
     monkeypatch.setenv('CONTROLLER_PROVIDER_ICONS_STATE',str(tmp_path/'icons.json'))
-    monkeypatch.setenv('CONTROLLER_BACKDROP_STATE',str(tmp_path/'backdrop.json'))
     async def run():
         observed=[]
         async def ma(request):

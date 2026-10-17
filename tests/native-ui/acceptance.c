@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include "controller_ui.h"
+#include "controller_splash.h"
 
 static controller_ui_t ui;
 static lv_color_t draw_buffer[480 * 80];
@@ -161,7 +162,16 @@ int main(int argc,char **argv) {
     lv_disp_drv_register(&display);
     lv_indev_drv_t input; lv_indev_drv_init(&input); input.type=LV_INDEV_TYPE_POINTER; input.read_cb=read_pointer;
     lv_indev_drv_register(&input);
+    ui.root=lv_scr_act();
+    controller_splash_show(true);
+    CHECK(controller_splash_visible());
+    screenshot("initial-boot-loading");
+    lv_obj_clean(lv_scr_act());
     controller_ui_create(&ui,lv_scr_act(),intent,show_players,show_sources,show_playing,save);
+    CHECK(controller_splash_visible());
+    screenshot("loading-during-ui-construction");
+    controller_splash_hide();
+    CHECK(!controller_splash_visible());
     const char *players[]={"Extension","Home Group","Callum's bedroom","Extension Telly"};
     for(unsigned i=0;i<4;i++) {
         lv_obj_t *row=lv_list_add_btn(ui.players_list,NULL,players[i]);
@@ -545,27 +555,25 @@ int main(int argc,char **argv) {
     before=intent_count; click(ui.volume_up); CHECK(intent_count==before+1 && last_intent.type==UI_VOLUME_UP);
     click(ui.settings_button); geometry();
     controller_ui_set_theme(&ui,999,false); CHECK(ui.palette==0);
-    unsigned char *backdrop=malloc(8+480*800*2);
-    CHECK(backdrop!=NULL);
-    char backdrop_path[1024]; snprintf(backdrop_path,sizeof(backdrop_path),"%s/test-theme.mcbg",argv[2]);
-    FILE *backdrop_file=fopen(backdrop_path,"rb"); CHECK(backdrop_file!=NULL);
-    CHECK(fread(backdrop,1,8+480*800*2,backdrop_file)==8+480*800*2);
-    CHECK(fgetc(backdrop_file)==EOF); fclose(backdrop_file);
-    CHECK(!controller_ui_set_backdrop(&ui,backdrop,12));
-    CHECK(controller_ui_set_backdrop(&ui,backdrop,8+480*800*2));
-    CHECK(ui.backdrop_loaded && !ui.backdrop_enabled);
-    controller_ui_enable_backdrop(&ui,true);
-    CHECK(lv_obj_get_style_bg_img_src(ui.root,0)==&ui.backdrop_descriptor);
-    controller_ui_show(&ui,UI_PLAYING); screenshot("backdrop-playing"); geometry();
-    controller_ui_show(&ui,UI_SETTINGS); screenshot("backdrop-settings"); geometry();
-    controller_ui_set_theme(&ui,3,true);
-    CHECK(ui.backdrop_enabled && ui.palette==3 && ui.light);
-    screenshot("backdrop-light-settings"); geometry();
-    controller_ui_enable_backdrop(&ui,false);
+    CHECK(!controller_splash_visible());
+    controller_splash_show(true);
+    CHECK(controller_splash_visible());
+    screenshot("boot-loading-splash");
+    /* A complete primary-view rebuild must not remove the top-layer splash. */
+    controller_ui_show(&ui,UI_PLAYING);
+    CHECK(controller_splash_visible());
+    controller_splash_hide();
+    CHECK(!controller_splash_visible());
     CHECK(lv_obj_get_style_bg_img_src(ui.root,0)==NULL);
-    controller_ui_set_backdrop(&ui,NULL,0);
-    CHECK(!ui.backdrop_loaded && ui.backdrop_pixels==NULL);
-    free(backdrop);
+    screenshot("after-boot-splash"); geometry();
+    controller_splash_show(false);
+    CHECK(controller_splash_visible());
+    screenshot("before-sleep-splash");
+    controller_splash_hide();
+    controller_splash_hide(); /* Idempotent on wake and settings changes. */
+    CHECK(!controller_splash_visible());
+    screenshot("after-sleep-splash"); geometry();
+    controller_ui_show(&ui,UI_SETTINGS);
     ui.power_cb=power_saved;
     controller_ui_power(&ui,30,0,0,"Auto uses battery; USB detection unavailable");
     click(ui.power_button);
