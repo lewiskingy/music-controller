@@ -4,6 +4,10 @@ A shared household touchscreen remote for [Music Assistant](https://www.music-as
 
 This repository contains the **ESP32 firmware, required backend gateway and browser UX prototype**. You can build and run them with your own Music Assistant server; Atlas is one deployment, not a prerequisite.
 
+## Install on Windows
+
+Download **music-controller-setup.exe** from the [latest release](https://github.com/lewiskingy/music-controller/releases/latest) to update an existing controller or provision a new device. The executable bundles Python and the flashing tools; ESP-IDF is not required on the installing PC. See [installation, gateway keys and release versioning](installer/README.md). Installer assets become available with the first release containing this workflow.
+
 ## What works today
 
 | Part | Current capabilities |
