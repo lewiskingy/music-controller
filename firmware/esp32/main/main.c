@@ -210,6 +210,7 @@ static void update_now_playing(void);
 static void build_queue_view(void);
 static void build_browse_view(void);
 static void build_search_view(void);
+static void sync_connection_splash(void);
 static bool render(void) {
     if (!now_screen || !lvgl_port_lock(250)) return false;
     bool rendered = false;
@@ -220,6 +221,7 @@ static bool render(void) {
         if (queue_dirty) { build_queue_view(); queue_dirty=false; }
         if (browse_dirty) { build_browse_view(); browse_dirty=false; }
         if (search_dirty) { build_search_view(); search_dirty=false; }
+        sync_connection_splash();
         xSemaphoreGive(state_mutex);
         rendered = true;
     }
@@ -803,12 +805,23 @@ static unsigned power_mode;
 static char power_device_id[18];
 static volatile bool power_report_pending;
 static power_activity_t power_activity;
+/* LVGL-owned snapshot, so wake never exposes controls while offline. */
+static bool display_ready;
+static char display_status[sizeof(state)] = "Loading...";
+static void restore_connection_splash(void) {
+    controller_splash_status(display_ready ? NULL : display_status);
+}
+static void sync_connection_splash(void) {
+    display_ready=ready && ip_ready && ws_connected;
+    snprintf(display_status,sizeof(display_status),"%s",state);
+    if(!power_activity.sleep_pending) restore_connection_splash();
+}
 static void (*power_original_read)(lv_indev_drv_t *, lv_indev_data_t *);
 static void power_read(lv_indev_drv_t *driver,lv_indev_data_t *data) {
     power_original_read(driver,data);
     bool pressed=data->state==LV_INDEV_STATE_PR;
     if(power_touch(&power_activity,lv_tick_get(),pressed)) {
-        controller_splash_hide();
+        restore_connection_splash();
         if(waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
     }
     if(power_suppress(&power_activity,pressed)) data->state=LV_INDEV_STATE_REL;
@@ -827,7 +840,7 @@ static void power_tick(lv_timer_t *timer) {
        waveshare_rgb_lcd_bl_off()==ESP_OK) {
         power_activity.asleep=true;
         power_activity.sleep_pending=false;
-        controller_splash_hide();
+        restore_connection_splash();
     }
 }
 static void power_ui_change(int battery,int usb,int mode) {
@@ -884,7 +897,7 @@ static void power_process(void) {
                 power_mode=change.mode; power_activity.last_touch=lv_tick_get();
                 if(power_activity.sleep_pending) {
                     power_activity.sleep_pending=false;
-                    controller_splash_hide();
+                    restore_connection_splash();
                 }
                 if(power_timeout(power_battery,power_usb,power_mode)==0 && power_activity.asleep && waveshare_rgb_lcd_bl_on()==ESP_OK) power_activity.asleep=false;
             }
@@ -935,7 +948,7 @@ static void handle_message(const char *payload, size_t len) {
             gateway_can_artwork = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "data"), "artwork_rgb565"));
             screen_dirty = true;
         } else if (!strcmp(event->valuestring, "gateway/error")) {
-            ready = false; status("Gateway authentication failed");
+            ready = false; status("Waiting for Music Assistant");
         } else if (strstr(event->valuestring, "player") || strstr(event->valuestring, "queue")) {
             refresh_pending = true;
             if(strstr(event->valuestring,"queue_items") && active_view==VIEW_QUEUE) queue_requested=true;
@@ -1572,7 +1585,6 @@ void app_main(void) {
     if (lvgl_port_lock(2000)) {
         lv_obj_clean(lv_scr_act());
         init_screen();
-        controller_splash_hide();
         lv_obj_invalidate(lv_scr_act());
         lvgl_port_unlock();
         ESP_LOGI(TAG, "Diagnostic screen created");
@@ -1584,8 +1596,9 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to acquire LVGL lock");
         ESP_ERROR_CHECK(ESP_ERR_TIMEOUT);
     }
-    if (err != ESP_OK) { status("NVS initialisation failed"); return; }
+    if (err != ESP_OK) { status("NVS initialisation failed"); render(); return; }
     if (!load_config()) { status("Provision device NVS first"); render(); return; }
+    status("Connecting to Wi-Fi..."); render();
     ESP_ERROR_CHECK(xTaskCreate(provider_icon_worker,"provider-icons",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(xTaskCreate(artwork_worker,"artwork",6144,NULL,3,NULL)==pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(esp_netif_init());
@@ -1631,6 +1644,8 @@ static void __attribute__((noinline)) controller_loop(void) {
     while (true) {
         power_process();
         if (ip_ready && !started) {
+            /* Present the network status before the bounded clock-sync wait. */
+            render();
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) == ESP_OK) {
                 status("Clock synced; connecting...");
                 log_memory("before WSS");
@@ -1711,3 +1726,4 @@ static void __attribute__((noinline)) controller_loop(void) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
+
