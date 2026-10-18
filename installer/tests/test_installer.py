@@ -256,8 +256,8 @@ def test_manual_bootloader_preserves_download_mode_between_flash_operations(pack
     assert len(calls) == 2
     for args in calls:
         assert args[args.index("--baud") + 1] == "115200"
-        assert args[args.index("--before") + 1] == "no-reset"
-        assert args[args.index("--after") + 1] == "no-reset"
+        assert args[args.index("--before") + 1] == "no_reset"
+        assert args[args.index("--after") + 1] == "no_reset"
         assert "erase_flash" not in args
         assert "0x9000" not in args
     assert "read_flash" in calls[0] and "write_flash" in calls[1]
@@ -270,3 +270,12 @@ def test_normal_flash_keeps_default_reset_behaviour(package):
         core.flash(profile, path, "COM4")
     assert all("--before" not in call and "--after" not in call for call in calls)
     assert all(call[call.index("--baud") + 1] == "460800" for call in calls)
+
+
+def test_manual_options_match_bundled_esptool_parser():
+    import esptool
+    parser = esptool.get_parser()
+    args = parser.parse_args(["--chip", "esp32s3", "--port", "COM4", "--baud", "115200",
+                              "--before", "no_reset", "--after", "no_reset", "flash_id"])
+    assert args.before == "no_reset"
+    assert args.after == "no_reset"
