@@ -81,6 +81,7 @@ def verify_bundle(directory, version):
     if manifest["version"] != version or manifest["gateway"]["source_tag"] != version:
         raise ValueError("Manifest version does not match the release")
     expected = {
+        "LICENSE", "NOTICE", "THIRD_PARTY.md",
         "music-controller-setup.exe", "music-controller-cli.exe",
         "music-controller-full-flash.bin", "release-manifest.json",
         f"music-controller-prototype-{version}.tar.gz",

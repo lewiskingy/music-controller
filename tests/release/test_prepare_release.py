@@ -37,7 +37,7 @@ def bundle(tmp_path):
         files.append(dict(role=role, asset=name, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
     manifest = dict(version=version, gateway=dict(source_tag=version), profiles=[dict(files=files)])
     (tmp_path / 'release-manifest.json').write_text(json.dumps(manifest))
-    for name in ['music-controller-setup.exe', 'music-controller-cli.exe', 'music-controller-full-flash.bin', f'music-controller-prototype-{version}.tar.gz', f'music-controller-gateway-{version}.tar.gz']:
+    for name in ['LICENSE', 'NOTICE', 'THIRD_PARTY.md', 'music-controller-setup.exe', 'music-controller-cli.exe', 'music-controller-full-flash.bin', f'music-controller-prototype-{version}.tar.gz', f'music-controller-gateway-{version}.tar.gz']:
         (tmp_path / name).write_bytes(b'asset')
     return tmp_path
 
@@ -51,10 +51,12 @@ def test_bundle_checksums_cover_every_download(bundle):
         assert digest == hashlib.sha256((bundle / name).read_bytes()).hexdigest()
 
 
-@pytest.mark.parametrize('damage', ['missing', 'corrupt', 'empty', 'version', 'extra', 'roles'])
+@pytest.mark.parametrize('damage', ['missing', 'missing_license', 'corrupt', 'empty', 'version', 'extra', 'roles'])
 def test_incomplete_bundle_rejected_before_remote_mutation(bundle, damage, monkeypatch):
     if damage == 'missing':
         (bundle / 'music-controller-cli.exe').unlink()
+    elif damage == 'missing_license':
+        (bundle / 'LICENSE').unlink()
     elif damage == 'corrupt':
         (bundle / 'waveshare-4.3-application.bin').write_bytes(b'wrong')
     elif damage == 'empty':

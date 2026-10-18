@@ -88,6 +88,8 @@ def main():
     for name in ('ASSEMBLY.md','README.md','geometry.py','build.py','render.py','test_geometry.py','requirements.txt'):
         shutil.copyfile(ROOT/name,out/name)
     (out/'README.md').write_text((out/'README.md').read_text().replace('previews/',''))
+    for name in ('LICENSE', 'NOTICE', 'THIRD_PARTY.md'):
+        shutil.copyfile(ROOT.parents[1]/name, out/name)
     shutil.copytree(ROOT/'reference',out/'reference',dirs_exist_ok=True)
     (out/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out)}\n' for p in sorted(out.rglob('*')) if p.is_file() and p.name not in ('SHA256SUMS','print-package.zip','print-package.zip.sha256')))
     with zipfile.ZipFile(out/'print-package.zip','w',zipfile.ZIP_DEFLATED) as archive:

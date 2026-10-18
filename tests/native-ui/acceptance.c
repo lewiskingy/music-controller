@@ -375,6 +375,16 @@ int main(int argc,char **argv) {
     controller_ui_queue(&ui,rows,5,20,25,state.item_id,"Tap a track to play",false,true);
     CHECK(!lv_obj_has_state(ui.queue_back,LV_STATE_DISABLED));
     CHECK(lv_obj_has_state(ui.queue_more,LV_STATE_DISABLED)); screenshot("queue-last-page"); geometry();
+    /* Later-page taps keep stable item/player/queue identity, not a numeric offset. */
+    before=intent_count; click(ui.queue_rows[1]);
+    CHECK(intent_count==before+1 && last_intent.type==UI_QUEUE_PLAY);
+    CHECK(!strcmp(last_intent.item_id,"queue-track-2"));
+    CHECK(!strcmp(last_intent.player_id,"room-a") && !strcmp(last_intent.queue_id,"queue-a"));
+    /* A queue switch on the same player invalidates the still-visible page. */
+    state.queue_id="replacement-queue"; controller_ui_update(&ui,&state);
+    before=intent_count; click(ui.queue_rows[0]); CHECK(intent_count==before);
+    CHECK(lv_obj_has_state(ui.queue_rows[0],LV_STATE_DISABLED));
+    state.queue_id="queue-a"; controller_ui_update(&ui,&state);
     click(ui.queue_back); CHECK(last_intent.type==UI_QUEUE_BACK);
     click(ui.queue_refresh); CHECK(last_intent.type==UI_QUEUE_REFRESH);
     state.player_id="other-room"; controller_ui_update(&ui,&state);

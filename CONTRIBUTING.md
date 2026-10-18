@@ -31,3 +31,7 @@ Maintainers review and release changes. Opening a PR does not authorize merging,
 Read the [release asset guide](docs/releases.md) and [binary/address table](firmware/esp32/README.md#release-binaries-and-flash-addresses) before changing packaging or flashing instructions. Keep Actions artifact filenames, release filenames and merged images distinct. Document application-only updates versus complete installation, including private NVS provisioning. Never distribute NVS credentials with public firmware. Agents must preserve these distinctions as well as follow [AGENTS.md](AGENTS.md).
 
 Pull requests report a single **PR checks** gate; relevant component checks must pass. See [branch protection](docs/branch-protection.md) for the main ruleset and intentionally skipped checks.
+
+## Licensing contributions
+
+Unless explicitly agreed otherwise, contributions intentionally submitted for inclusion are provided under the project's [Apache License 2.0](LICENSE), as described in section 5. Contributors retain their copyright. Submit only material you have the right to contribute, identify third-party sources and preserve their notices. Do not assume dependency code, provider logos or manufacturer models are covered by our licence; see [THIRD_PARTY.md](THIRD_PARTY.md).

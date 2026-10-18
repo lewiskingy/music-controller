@@ -18,12 +18,18 @@ jobs:
       - run: python -m pytest installer/tests -q
       - name: Build self-contained executables
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name music-controller-setup --paths installer --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
-          python -m PyInstaller --noconfirm --clean --onefile --console --name music-controller-cli --paths installer --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name music-controller-setup --paths installer --add-data "LICENSE:licensing" --add-data "NOTICE:licensing" --add-data "THIRD_PARTY.md:licensing" --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
+          python -m PyInstaller --noconfirm --clean --onefile --console --name music-controller-cli --paths installer --add-data "LICENSE:licensing" --add-data "NOTICE:licensing" --add-data "THIRD_PARTY.md:licensing" --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
       - name: Smoke test frozen runtime
         run: dist/music-controller-cli.exe --self-test
+      - name: Include licence and attribution with installer downloads
+        run: Copy-Item LICENSE, NOTICE, THIRD_PARTY.md dist/
       - uses: actions/upload-artifact@v4
         with:
           name: music-controller-windows
-          path: dist/music-controller-*.exe
+          path: |
+            dist/music-controller-*.exe
+            dist/LICENSE
+            dist/NOTICE
+            dist/THIRD_PARTY.md
           if-no-files-found: error

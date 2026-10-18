@@ -60,3 +60,7 @@ Official archive: https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3/ESP32-
 Archive SHA-256: `8721fac43de47b35771c438829a3251a4c0723227d83696b5517efe7d854de15`
 
 Archive contains `esp32-s3-touch-lcd-4_3.stp`, dated 2023-12-13, with 693 solids. Mounting pattern 98 × 60 mm; model's total depth 16.90 mm. Measured details are in ASSEMBLY.md. The portrait enclosure is 80 × 138 × 28 mm, with a local battery compartment reaching 39 mm. The rounded 54 × 48 mm battery compartment projects 11 mm beyond the main back. Its centre is X=+4, Y=−12, towards the lower battery-header region; the dock supports the case either side of this compartment. Case corner radius is 6 mm, with 0.8 mm exposed edge rounding. The tray assumes an approximately 40 × 34 × 10 mm pack and provides a 44 × 38 × 12 mm cavity.
+
+## License
+
+Original enclosure source, generated case/dock designs and renders are licensed under [Apache-2.0](../../LICENSE). The print package includes LICENSE, NOTICE and THIRD_PARTY.md. Waveshare's manufacturer model is separately owned and is not relicensed or distributed in the print package. See [third-party materials](../../THIRD_PARTY.md).
