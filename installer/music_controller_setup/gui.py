@@ -123,6 +123,11 @@ class Installer:
     def show_serial(self):
         if self.serial_visible.get():
             self.serial_text.pack(fill="both", expand=True, pady=4)
+            self.serial_text.configure(state="normal")
+            self.serial_text.delete("1.0", "end")
+            self.serial_text.insert("end", "\n".join(self.serial_lines) + ("\n" if self.serial_lines else ""))
+            self.serial_text.see("end")
+            self.serial_text.configure(state="disabled")
         else:
             self.serial_text.pack_forget()
 
@@ -133,7 +138,7 @@ class Installer:
             self.serial_lines = self.serial_lines[-1500:]
         if self.serial_visible.get():
             self.serial_text.configure(state="normal")
-            self.serial_text.insert("end", line + "\\n")
+            self.serial_text.insert("end", line + "\n")
             if int(self.serial_text.index("end-1c").split(".")[0]) > 1501:
                 self.serial_text.delete("1.0", "3.0")
             self.serial_text.see("end")
@@ -155,13 +160,13 @@ class Installer:
 
     def copy_serial(self):
         self.root.clipboard_clear()
-        self.root.clipboard_append("\\n".join(self.serial_lines))
+        self.root.clipboard_append("\n".join(self.serial_lines))
 
     def save_serial(self):
         target = filedialog.asksaveasfilename(defaultextension=".log",
                                              filetypes=[("Text log", "*.log"), ("All files", "*.*")])
         if target:
-            Path(target).write_text("\\n".join(self.serial_lines) + "\\n", encoding="utf-8")
+            Path(target).write_text("\n".join(self.serial_lines) + "\n", encoding="utf-8")
 
     def clear_serial(self):
         self.serial_lines.clear()
