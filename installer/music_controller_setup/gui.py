@@ -233,7 +233,7 @@ class Installer:
                     core.provision(settings, profile, target)
                 if not prepare_only:
                     self.events.put((None, "Flashing device; keep USB connected…"))
-                    core.flash(profile, target, port, full)
+                    core.flash(profile, target, port, full, log=lambda message: self.events.put((None, message)))
             return f"Prepared: {destination}. Keep NVS private." if prepare_only else "Installation complete. Temporary files removed."
         self.task(work, lambda result: self.status.set(result))
 
