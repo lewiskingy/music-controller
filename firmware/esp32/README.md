@@ -30,7 +30,17 @@ Where supplied, `music-controller-full-flash.bin` combines the public firmware c
 
 Now Playing, Players, Providers, artwork, Queue, Browse and Search use separate full-screen views. Firmware supports playback/seek, 5% volume stepping, persisted player/provider and colour preferences, provider icons and backlight timeouts. Sonos Pause is disabled while playing; Stop is available. See [current project limits](../../README.md#current-limits).
 
-The Loading image appears during boot and briefly before backlight-off. Auto power mode uses battery timing even on USB; choose USB/external manually for that timeout. This is backlight power saving, not deep sleep. Wireless OTA is not implemented.
+The bundled image appears during boot, while waiting for Wi-Fi, network time,
+the gateway or Music Assistant, and briefly before backlight-off. The current
+connection status is shown over the image; it blocks touches to the controls
+until Wi-Fi and the authenticated Music Assistant gateway session are ready.
+Connection loss covers any open view, and reconnecting restores that view.
+While the screen is on, waiting for connectivity or clock sync does not count
+toward the idle timeout. Once ready, the full configured timeout starts afresh.
+A disconnection during the two-second pre-sleep image cancels screen blanking.
+Background disconnections/reconnections do not wake an already dark screen.
+An unavailable player alone does not hide the player selector. Waking while
+offline restores the waiting screen and consumes the first touch as before. Auto power mode uses battery timing even on USB; choose USB/external manually for that timeout. This is backlight power saving, not deep sleep. Wireless OTA is not implemented.
 
 ## Gateway prerequisite
 
@@ -195,9 +205,13 @@ Rendering rules for future changes:
 
 Startup presents the bundled Loading splash before building the main UI and saved
 appearance in one locked transaction. The loading frame stays visible until the
-completed main frame is presented. It does not wait for Wi-Fi, gateway or artwork.
-Later transitions retain the previous frame instead of inserting a loading page.
+completed main frame is prepared. The same overlay then presents connection
+status until the gateway has completed its Music Assistant handshake. It uses the
+bundled image without waiting for a network download. Later view transitions
+retain the previous frame; connection loss covers all views with the waiting
+overlay. No gateway, contract, configuration or Atlas release-pin update is required.
 
 WebSocket Ping/Pong control frames bypass the JSON assembler and do not discard a
 partial message. Individual fragment logs use DEBUG rather than INFO; assembled
 message sizes and response summaries remain visible.
+
