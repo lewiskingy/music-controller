@@ -48,6 +48,8 @@ jobs:
   installer:
     needs: version
     uses: ./.github/workflows/installer.yml
+    with:
+      release_version: ${{ needs.version.outputs.version }}
   firmware:
     needs: version
     uses: ./.github/workflows/firmware.yml

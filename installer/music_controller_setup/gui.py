@@ -5,7 +5,7 @@ import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from . import core
+from . import core, update
 
 
 class Installer:
@@ -16,7 +16,7 @@ class Installer:
         self.selected = None
         self.data = None
         self.available = []
-        root.title("Music Controller Setup")
+        root.title(f"Music Controller Setup {update.VERSION}")
         root.geometry("720x740")
         root.minsize(680, 740)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -72,6 +72,31 @@ class Installer:
         ttk.Label(frame, textvariable=self.status, wraplength=600).pack(anchor="w")
         root.after(100, self.poll)
         self.refresh()
+        threading.Thread(target=self.check_update, daemon=True).start()
+
+    def check_update(self):
+        try:
+            info = update.release_info()
+            if info:
+                self.events.put((self.update_available, info))
+        except Exception:
+            pass  # offline use remains available
+
+    def update_available(self, info):
+        if self.busy:
+            self.root.after(1200, lambda: self.update_available(info))
+            return
+        if messagebox.askyesno("Setup update available",
+                f"Music Controller Setup {info['version']} is available.\n"
+                f"Current installer: {update.VERSION}.\n\nUpdate now?"):
+            self.task(lambda: update.stage(info), self.launch_update)
+
+    def launch_update(self, path):
+        try:
+            update.begin_update(path)
+        except Exception as error:
+            return self.failed("Could not start verified update: " + type(error).__name__)
+        self.root.destroy()
 
     def combo(self, parent, label, callback=None):
         ttk.Label(parent, text=label).pack(anchor="w")
@@ -144,6 +169,12 @@ class Installer:
         self.task(lambda: core.manifest(self.selected), self.manifest_loaded)
 
     def manifest_loaded(self, data):
+        if not update.compatible(data) and update.VERSION != "0.0.0":
+            self.data = None
+            self.status.set("This firmware release requires Music Controller Setup " +
+                            update.minimum_version(data) + " or newer. Update the installer.")
+            messagebox.showwarning("Installer update required", self.status.get())
+            return
         self.data = data
         self.profile["values"] = [p["name"] for p in data["profiles"]]
         self.profile.current(0)
