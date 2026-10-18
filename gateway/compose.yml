@@ -25,7 +25,6 @@ services:
     restart: unless-stopped
     environment:
       CONTROLLER_HOST: ${CONTROLLER_HOST:?Set CONTROLLER_HOST in .env}
-      MA_HTTP_UPSTREAM: ${MA_HTTP_UPSTREAM:?Set MA_HTTP_UPSTREAM in .env}
     ports:
       - '${CONTROLLER_BIND_IP:-127.0.0.1}:443:443'
       - '${CONTROLLER_BIND_IP:-127.0.0.1}:80:80'
