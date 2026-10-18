@@ -6,11 +6,11 @@ Use **PR checks** as the single required status check. Do not require individual
 
 ## Activate after the gate PR is merged
 
-In repository **Settings → Rules → Rulesets**, create an active branch ruleset for `main`:
+In repository **Settings → Rules → Rulesets**, create an active branch ruleset for the default branch (currently `main`):
 
 - Require a pull request, with zero approving reviews for this single-maintainer repository.
 - Require conversation resolution.
-- Require **PR checks** and an up-to-date branch.
+- Require **PR checks** from **GitHub Actions** and an up-to-date branch.
 - Block force pushes and branch deletion.
 - Leave signed commits, linear history, deployments and merge queue requirements off.
 

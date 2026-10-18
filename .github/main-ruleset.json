@@ -4,11 +4,20 @@
   "enforcement": "active",
   "bypass_actors": [],
   "conditions": {
-    "ref_name": {"include": ["refs/heads/main"], "exclude": []}
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
   },
   "rules": [
-    {"type": "deletion"},
-    {"type": "non_fast_forward"},
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
     {
       "type": "pull_request",
       "parameters": {
@@ -22,7 +31,12 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "required_status_checks": [{"context": "PR checks"}],
+        "required_status_checks": [
+          {
+            "context": "PR checks",
+            "integration_id": 15368
+          }
+        ],
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false
       }
