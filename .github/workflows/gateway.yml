@@ -1,11 +1,5 @@
 name: Music Controller gateway
 on:
-  pull_request:
-    paths:
-      - 'gateway/**'
-      - 'contracts/**'
-      - '.github/workflows/gateway.yml'
-      - '!gateway/**/*.md'
   push:
     branches: [main]
     paths:

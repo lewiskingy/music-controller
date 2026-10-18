@@ -1,11 +1,5 @@
 name: Browser prototype checks
 on:
-  pull_request:
-    paths:
-      - 'prototype/**'
-      - 'tests/prototype/**'
-      - 'contracts/**'
-      - '.github/workflows/prototype.yml'
   push:
     branches: [main]
     paths:
