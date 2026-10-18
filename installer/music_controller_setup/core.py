@@ -1,5 +1,7 @@
 """Release discovery, verified preparation, provisioning and USB flashing."""
 import csv
+import contextlib
+import io
 import hashlib
 import json
 from pathlib import Path
@@ -170,17 +172,37 @@ def ports():
     return [(p.device, p.description) for p in comports()]
 
 
-def flash(profile, destination, port, full=False):
+def flash(profile, destination, port, full=False, log=None):
     import esptool
     validate_profile(profile)
     destination = Path(destination)
     files = profile["files"] if full else [f for f in profile["files"] if f["role"] in ("otadata", "application")]
     args = ["--chip", profile["chip"], "--port", port, "--baud", "460800"]
-    def run(arguments):
+    def run(arguments, stage):
+        # PyInstaller --windowed otherwise swallows esptool diagnostics because
+        # it has no console. Capture only the USB stage: never provisioning data.
+        if log:
+            log(stage + "…")
+        capture = io.StringIO()
         try:
-            esptool.main(arguments)
-        except (SystemExit, esptool.FatalError) as error:
-            raise SetupError("USB flashing failed. Check the selected port, close serial monitors, and put the board into download mode before retrying.") from error
+            with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+                esptool.main(arguments)
+        except (SystemExit, esptool.FatalError, OSError) as error:
+            lines = [line.strip() for line in capture.getvalue().splitlines()
+                     if line.strip() and not line.startswith("esptool.py v")]
+            # Keep actionable esptool diagnostics but avoid dumping arbitrary
+            # serial/device output, paths or private provisioning values.
+            detail = next((line for line in reversed(lines)
+                           if any(word in line.lower() for word in
+                                  ("fatal error", "failed to", "timed out", "serial", "port",
+                                   "invalid head", "unexpected packet", "wrong boot",
+                                   "could not", "error:", "no serial"))), "")
+            detail = re.sub(r"[^\\x20-\\x7e]", " ", detail)[:240]
+            raise SetupError(
+                f"USB {stage.lower()} failed on {port}."
+                + (f" Esptool: {detail}" if detail else f" ({type(error).__name__})")
+                + " Close serial monitors and try bootloader mode if connection failed."
+            ) from error
     if full:
         if not (destination / "controller-nvs.bin").is_file():
             raise SetupError("Provisioning settings are required before full flash")
@@ -193,17 +215,17 @@ def flash(profile, destination, port, full=False):
     if full:
         if (destination / "controller-nvs.bin").stat().st_size != profile["nvs"]["size"]:
             raise SetupError("Invalid NVS image size")
-        run(args + ["erase_flash"])
+        run(args + ["erase_flash"], "Erase flash")
         writes += [hex(profile["nvs"]["offset"]), str(destination / "controller-nvs.bin")]
     else:
         table = next(f for f in profile["files"] if f["role"] == "partitions")
         expected = (destination / table["asset"]).read_bytes()
         with tempfile.TemporaryDirectory(prefix="controller-layout-") as temp:
             saved = Path(temp) / "partitions.bin"
-            run(args + ["read_flash", "0x8000", "0x1000", str(saved)])
+            run(args + ["read_flash", "0x8000", "0x1000", str(saved)], "Read partition table")
             if saved.read_bytes()[:len(expected)] != expected:
                 raise SetupError("Device partition layout differs; use new-device setup after saving settings")
-    run(args + ["write_flash", "--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "16MB"] + writes)
+    run(args + ["write_flash", "--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "16MB"] + writes, "Write firmware")
 
 
 def self_test():
