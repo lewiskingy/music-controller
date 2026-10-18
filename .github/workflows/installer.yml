@@ -25,7 +25,8 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         shell: pwsh
         run: |
-          $version = $env:RELEASE_VERSION.TrimStart('v')
+          $requested = $env:RELEASE_VERSION
+          $version = if ([string]::IsNullOrWhiteSpace($requested)) { '0.0.0' } else { $requested.TrimStart('v') }
           if ($version -notmatch '^[0-9]+[.][0-9]+[.][0-9]+$') { throw "Invalid installer version" }
           Set-Content installer/music_controller_setup/_build_version.py "VERSION = '$version'" -Encoding utf8
       - run: python -m pytest installer/tests -q
