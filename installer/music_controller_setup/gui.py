@@ -317,32 +317,31 @@ class Installer:
             action = "ERASE ALL DATA and provision" if full else "Update firmware and preserve settings"
             if not messagebox.askokcancel("Confirm installation", f"{selected['tag_name']}\n{profile['name']}\n{port}\n\n{action}? Keep USB connected until complete."):
                 return
+        phase = ["prepare release"]
         def work():
-            phase = "prepare release"
             try:
                 return perform_work()
             except PermissionError as error:
                 code = getattr(error, "winerror", None) or getattr(error, "errno", None)
                 raise core.SetupError(
-                    f"Access denied during {phase} (OS error {code or 'unknown'}). "
+                    f"Access denied during {phase[0]} (OS error {code or 'unknown'}). "
                     "Check whether another application has COM4 open or antivirus is "
                     "locking temporary downloads."
                 ) from error
 
         def perform_work():
-            nonlocal phase
             with tempfile.TemporaryDirectory(prefix="music-controller-") as temp:
                 target = destination or Path(temp)
                 if destination:
                     target.mkdir(exist_ok=False)
-                phase = "release download"
+                phase[0] = "release download"
                 core.prepare(selected, profile, target, lambda message: self.events.put((None, message)))
                 if full:
-                    phase = "device provisioning"
+                    phase[0] = "device provisioning"
                     core.provision(settings, profile, target)
                 if not prepare_only:
                     self.events.put((None, "Flashing device; keep USB connected…"))
-                    phase = "USB firmware flashing"
+                    phase[0] = "USB firmware flashing"
                     resume = self.monitor.running
                     if resume:
                         self.monitor.stop()
@@ -355,7 +354,7 @@ class Installer:
                         if resume:
                             self.monitor.start(port)
                             self.events.put((None, "Serial monitor resumed after flashing"))
-            phase = "complete"
+            phase[0] = "complete"
             return f"Prepared: {destination}. Keep NVS private." if prepare_only else "Installation complete. Temporary files removed."
         self.task(work, lambda result: (self.status.set(result),
             messagebox.showinfo("Manual restart", "Flash completed. Press RESET (without BOOT) to run the firmware.")
