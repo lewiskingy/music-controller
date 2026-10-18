@@ -183,7 +183,7 @@ def flash(profile, destination, port, full=False, log=None, manual_bootloader=Fa
         # Caller must put board in download mode. Preserve this across separate
         # esptool read/write invocations; RTS reset can leave battery-powered
         # boards in the wrong state between stages.
-        args += ["--before", "no-reset", "--after", "no-reset"]
+        args += ["--before", "no_reset", "--after", "no_reset"]
     def run(arguments, stage):
         # PyInstaller --windowed otherwise swallows esptool diagnostics because
         # it has no console. Capture only the USB stage: never provisioning data.
