@@ -48,7 +48,7 @@ def single_instance():
 
 def release_info():
     """Only GitHub's latest *published stable* release, never rolling drafts."""
-    if not getattr(sys, "frozen", False) or version_tuple(VERSION) is None:
+    if not getattr(sys, "frozen", False) or VERSION == "0.0.0" or version_tuple(VERSION) is None:
         return None
     current = version_tuple(VERSION)
     release = json.loads(core.download(core.API + "/releases/latest", 1024 * 1024))
