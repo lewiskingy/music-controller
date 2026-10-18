@@ -46,7 +46,7 @@ The downloaded draft installer still discovers **published stable releases**, no
 | `LICENSE`, `NOTICE`, `THIRD_PARTY.md` | Project licence, attribution and dependency licensing boundaries; also included in source archives |
 | `SHA256SUMS` | SHA-256 hashes of all attached payloads and the manifest |
 
-Historical releases may contain browser prototype archives; these are no longer produced.
+Historical releases may contain browser prototype archives; new releases no longer produce them.
 Use **Releases → version → Assets** for durable released downloads. Actions artifacts are useful for testing PRs/commits and can expire. For Atlas, update its gateway source pin to the chosen published `vX.Y.Z`, then deploy normally; no archive download is required.
 
 ## Manual preparation, retries and safeguards
