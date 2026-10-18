@@ -1,19 +1,75 @@
 name: ESP32 firmware
 on:
-  pull_request:
-    paths:
-      - 'firmware/esp32/**'
-      - '.github/workflows/firmware.yml'
   push:
     branches: [main]
     paths:
       - 'firmware/esp32/**'
+      - 'tests/test_esp32*.py'
+      - 'tests/test_playback_policy.py'
+      - 'tests/native-ui/**'
+      - 'tests/native-display/**'
+      - 'contracts/**'
       - '.github/workflows/firmware.yml'
+      - 'tests/native-ui/**'
+      - 'tests/test_playback_policy.py'
+      - 'tests/test_esp32_focus_controls.py'
+      - 'tests/test_esp32_providers_volume.py'
+      - 'tests/test_esp32_provider_save.py'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_version:
+        type: string
+        default: ""
 permissions:
   contents: read
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Verify playback policy and native UI contracts
+        run: python -m pytest -q tests/test_esp32_display.py tests/test_esp32_power.py tests/test_playback_policy.py tests/test_esp32_focus_controls.py tests/test_esp32_providers_volume.py tests/test_esp32_provider_save.py
+  ui-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the firmware's pinned LVGL version
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v8.3.11
+          path: .test-deps/lvgl
+      - name: Build native firmware UI simulator
+        run: |
+          cmake -S tests/native-ui -B build/native-ui -DLVGL_SOURCE_DIR="$GITHUB_WORKSPACE/.test-deps/lvgl"
+          cmake --build build/native-ui -j2
+      - name: Exercise layout and interactions; capture framebuffers
+        run: |
+          python -m pip install -r gateway/requirements.txt
+          mkdir -p artifacts/native-ui
+          set -o pipefail
+          python tests/native-ui/mock_artwork.py build/mock-artwork
+          build/native-ui/ui_acceptance artifacts/native-ui build/mock-artwork 2>&1 | tee artifacts/native-ui/acceptance.log
+      - name: Convert captured screenshots to PNG
+        if: always()
+        run: python tests/native-ui/convert_screenshots.py artifacts/native-ui
+      - name: Upload native UI acceptance screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-controller-ui-screenshots-${{ github.sha }}
+          path: |
+            artifacts/native-ui/*.png
+            artifacts/native-ui/acceptance.log
+          if-no-files-found: warn
+          retention-days: 30
   build:
+    needs: [contracts, ui-acceptance]
     runs-on: ubuntu-latest
     container: espressif/idf:v5.4.2
     defaults:
@@ -28,14 +84,19 @@ jobs:
           . /opt/esp/idf/export.sh
           idf.py set-target esp32s3
           idf.py build
+          python check_memory_layout.py build/music_controller.elf
       - name: Package firmware with checksums
         run: |
           set -euo pipefail
           mkdir -p ../../dist/esp32
           cp build/bootloader/bootloader.bin ../../dist/esp32/
           cp build/partition_table/partition-table.bin ../../dist/esp32/
-          cp build/music_controller.bin ../../dist/esp32/
+          cp build/music_controller.bin build/music_controller.elf build/music_controller.map ../../dist/esp32/
+          cp sdkconfig ../../dist/esp32/
           cp build/flash_args ../../dist/esp32/
+          cp ../../LICENSE ../../NOTICE ../../THIRD_PARTY.md ../../dist/esp32/
+          # Compiler stack reports complement the on-device low-water diagnostics.
+          find build/esp-idf/main -name '*.su' -exec cp {} ../../dist/esp32/ \;
           cp build/ota_data_initial.bin ../../dist/esp32/
           (cd ../../dist/esp32 && sha256sum *.bin flash_args > SHA256SUMS)
       - name: Create single-file USB flash image
@@ -55,3 +116,18 @@ jobs:
           path: dist/esp32/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Package installer-compatible release assets
+        if: inputs.release_version != ''
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          python ../../installer/build_manifest.py build ../../dist/release "$VERSION"
+          cp ../../dist/esp32/music-controller-full-flash.bin ../../dist/release/
+      - name: Upload release firmware
+        if: inputs.release_version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-controller-release-firmware
+          path: dist/release/
+          if-no-files-found: error

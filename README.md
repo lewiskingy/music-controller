@@ -1,64 +1,68 @@
 # Music Controller
 
-A compact, household-friendly touchscreen remote for [Music Assistant](https://www.music-assistant.io/), initially targeting a Waveshare ESP32-S3 4.3-inch 800×480 capacitive display.
+A dedicated household touchscreen remote for [Music Assistant](https://www.music-assistant.io/). Choose a player, browse or search music, and control playback without opening a phone app.
 
-**Status:** LAN-hosted browser prototype with Music Assistant Now Playing, transport, queue and catalogue integration. ESP32 firmware has not been implemented.
+The controller runs on a supported ESP32 touchscreen. It controls your existing speakers/players through Music Assistant; audio travels from Music Assistant to those players. The controller and gateway do not play or relay audio.
 
-## Goals
+**[Start here: hardware to first playback →](docs/getting-started.md)** · [Download Windows installer](https://github.com/lewiskingy/music-controller/releases/latest/download/music-controller-setup.exe) · [Releases](https://github.com/lewiskingy/music-controller/releases)
 
-- One shared household remote for Music Assistant music libraries and players.
-- Browse, search, inspect queues, select rooms, and control playback.
-- Keep Music Assistant responsible for providers, catalogue, streaming, queues and player protocols.
-- Validate the 800×480 touch experience in a browser before porting the UI to ESP-IDF/LVGL.
-- Support a docked/battery-powered appliance with Atlas-managed OTA updates in a later phase.
+## What is included?
 
-## Fundamental UX principle — one focused screen
+| Component | What you get |
+| --- | --- |
+| [ESP32 firmware](firmware/esp32/README.md) | Portrait 480×800 touch UI: Now Playing, player/provider selection, artwork, Queue, Browse, Search, playback/seek/volume controls, colour preferences and backlight power saving |
+| [Dedicated gateway](gateway/README.md) | Required service connecting the controller to Music Assistant, including authentication, artwork conversion, device settings and provider-logo overrides |
+| [Windows installer](installer/README.md) | Prebuilt firmware installation and initial Wi-Fi/gateway configuration; updates preserve settings |
+| [Case and dock designs](hardware/enclosure/README.md) | Printable STL/STEP designs, renders and assembly instructions; first-fit prototype, not yet physically validated |
+| [Browser prototype](docs/prototype.md) | Optional older 800 × 480 landscape interaction prototype; not a preview of every current firmware feature |
 
-**The controller is an appliance, not a scrolling website.** Design for a strict **800 × 480 landscape viewport** matching the Waveshare hardware. Only **one primary viewpoint** may be visible at any time: Now Playing, Queue, Browse, Search or Players. Navigation **replaces** the current view; never append another panel beneath it. A clear Back action returns to Now Playing (or the parent browse level). The page and outer device never scroll; only a bounded list within the active screen may scroll. Controls must remain touch-friendly and useful without browser chrome, zoom or a keyboard. Apply this contract equally to the HTML prototype and future LVGL firmware.
+## What do I need?
 
-**Acceptance checks:** At 800 × 480, document-level scroll width and height are zero; switching screens does not change the device bounds; Queue and Browse fill the available content area; the Now Playing artwork/transport are not simultaneously displayed behind Queue; the current screen has one obvious navigation path home. Search may initially be a full-screen placeholder until API support is implemented.
+| Requirement | Details |
+| --- | --- |
+| Supported touchscreen | **Original Waveshare ESP32-S3-Touch-LCD-4.3**, 800×480 capacitive GT911, 16 MB flash / 8 MB PSRAM. Current firmware supports this board only; 4.3B/C, industrial and 4-inch models are not interchangeable. [Buying guide](docs/hardware.md) |
+| Power and flashing | USB data cable, suitable USB power supply, and a Windows x64 computer for the packaged installer. Manual flashing/build instructions are available for other systems. |
+| Battery | **Optional** for portable operation; USB-powered operation needs no battery. Use a compatible protected single-cell 3.7 V LiPo with verified polarity and charging suitability. [Battery and case requirements](docs/hardware.md#battery-and-enclosure) |
+| Music Assistant | A working installation on your network, configured music providers, at least one working output player, and a dedicated non-admin account for the gateway |
+| Gateway host | An always-running network host with Docker Compose v2, able to reach Music Assistant; it may share the Music Assistant host |
+| Network frontend | Wi-Fi access to the gateway through trusted HTTPS/WSS, with working DNS and a certificate trusted by the firmware. [Network setup](docs/getting-started.md#3-configure-dns-and-trusted-https) |
 
-## Architecture
+You do not need Atlas, this author's domain, a Home Assistant installation specifically, or ESP-IDF to use the Windows installer. You do need to deploy the gateway yourself; the installer does not install backend services.
 
-```text
-Navidrome / Spotify / BBC / other providers
-                  |
-           Music Assistant
-             /         \
-      Web prototype   ESP32-S3 firmware (later)
-      (browser)        (ESP-IDF + LVGL)
-```
+## Setup overview
 
-The browser currently connects through an **Atlas-hosted, LAN-only, server-authenticated Music Assistant gateway**. Credentials remain in Atlas secrets, not the public repository or browser. The future ESP32 can reuse this interface contract. Neither client owns a separate catalogue, queue or media backend.
+1. [Choose hardware](docs/hardware.md); start with USB power before assembling a case or connecting a battery.
+2. [Prepare Music Assistant](docs/getting-started.md#1-prepare-music-assistant) and verify playback on your chosen speaker/player.
+3. [Deploy the gateway](docs/getting-started.md#2-deploy-the-gateway), configure its Music Assistant account and generate a separate controller key.
+4. [Configure trusted HTTPS/WSS](docs/getting-started.md#3-configure-dns-and-trusted-https) reachable from the controller's Wi-Fi.
+5. [Install firmware](docs/getting-started.md#4-install-and-configure-the-controller) with Wi-Fi settings, your gateway URL and the matching controller key.
+6. [Verify first playback](docs/getting-started.md#5-verify-first-playback), set preferences, then optionally assemble the case.
 
-## Repository layout
+The touch interface uses **one focused screen** at a time, with large controls and scrolling confined to lists. The outer device screen does not scroll.
 
-- [docs/architecture.md](docs/architecture.md) — system boundaries and deployment approach
-- [docs/hardware.md](docs/hardware.md) — target device and power/dock direction
-- [contracts/music-assistant.md](contracts/music-assistant.md) — API spike and state/command contract
-- [prototype/](prototype/) — static HTML/CSS/JS touch UX prototype
-- [firmware/esp32/](firmware/esp32/) — future ESP-IDF/LVGL implementation
-- [hardware/](hardware/) — future enclosure and dock design
+## Current limits
 
-## Run the prototype
+- Automatic USB/battery power detection is unresolved. Auto uses the battery timeout; select USB/external manually for a permanently powered controller.
+- Power saving switches off the backlight, not the whole device. Battery runtime has not been established.
+- Sonos Pause is disabled while playing because of observed queue hopping; use Stop.
+- Updates use USB; wireless OTA delivery is not implemented.
+- No specific Music Assistant version is currently certified; verify the installed server and providers using the setup checklist.
+- The enclosure and optional contact-charging dock require physical fit/electrical validation. USB-only assembly is the simplest starting point.
 
-From the repository root:
+## Documentation
 
-```sh
-python3 -m http.server 8080 --directory prototype
-```
+[Getting started](docs/getting-started.md) · [Hardware](docs/hardware.md) · [Gateway deployment](gateway/README.md) · [Firmware/manual installation](firmware/esp32/README.md) · [Windows installer](installer/README.md) · [Case assembly](hardware/enclosure/ASSEMBLY.md) · [Troubleshooting](docs/troubleshooting.md)
 
-Open `http://localhost:8080` to inspect layout; live data requires Atlas Caddy routes and the gateway at `https://music.theflat.me.uk/controller/` on the LAN. A local static server alone cannot access that same-origin gateway.
+For implementation details: [architecture](docs/architecture.md), [protocol](contracts/music-assistant.md), [development](docs/development.md), [release preparation and downloads](docs/releases.md), and [firmware engineering history](docs/firmware-history.md).
 
-## Next milestones
+Keep `.env`, controller keys and private NVS binaries private. Deploy on a trusted LAN; the example browser/settings frontend is not a public authenticated service.
 
-1. Validate transport, queue and browse commands against the installed Music Assistant version; complete Search and artwork handling.
-2. Verify the strict 800×480 single-screen UX on mobile and Waveshare-sized display.
-3. ESP32-S3 firmware foundation and CI (see [firmware/esp32](firmware/esp32/README.md)); then Waveshare board-specific display/touch BSP and native LVGL UI.
-4. Power management, dock, enclosure and Atlas-managed signed OTA/rollback.
+## Contributing
 
-Originating initiative: [Atlas #577](https://github.com/lewiskingy/atlas/issues/577).
+Bug reports, improvements and hardware testing are welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** before starting.
 
-## Security
+**Using an AI coding agent? It must read [AGENTS.md — required repository instructions](AGENTS.md) before making changes, plus any AGENTS.md instructions in the directories it modifies.**
 
-Never commit Music Assistant credentials, tokens, home Wi-Fi secrets or local host addresses. Use a LAN-restricted deployment and avoid exposing player stream endpoints publicly.
+## License
+
+Music Controller's original code, documentation, artwork and enclosure designs are open source under the **[Apache License 2.0](LICENSE)**, except where otherwise noted. You may use, modify and redistribute them, including commercially, subject to the licence. Publishing modifications is not required. See [NOTICE](NOTICE) and [third-party materials](THIRD_PARTY.md) for attribution and separately licensed components.

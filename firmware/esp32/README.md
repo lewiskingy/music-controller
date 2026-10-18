@@ -1,309 +1,217 @@
-# ESP32-S3 firmware foundation
+# ESP32 touchscreen firmware
 
-**Status:** LCD/touch bring-up is proven on hardware. This branch adds a first **read-only connected Now Playing** firmware: Wi-Fi, TLS WebSocket to the Atlas device gateway, player/queue state and LVGL text. It does not yet implement artwork, queue browsing, transport buttons or OTA.
+Current firmware targets the original **Waveshare ESP32-S3-Touch-LCD-4.3**, 800×480 GT911, 16 MB flash / 8 MB PSRAM, rotated to a **480×800 portrait UI**. Other variants require separate support. See [hardware requirements](../../docs/hardware.md).
 
-## Build
+## Install or update
 
-Use ESP-IDF v5.4.2 (also pinned in CI):
+**Start with [Getting Started](../../docs/getting-started.md).** Windows x64 users should use the [packaged installer](../../installer/README.md): new setup installs firmware and private settings; update mode preserves settings. No ESP-IDF installation is required for that route.
 
-```bash
+The manual instructions below use **Actions artifact filenames**. Tagged installer releases use names such as `waveshare-4.3-application.bin`; these are separate bootloader/partitions/OTA/application files, not a merged image. Do not substitute one filename for another without checking its role and address. Use the release installer to manage those assets.
+
+## Release binaries and flash addresses
+
+**`waveshare-4.3-application.bin` is the application firmware**, equivalent to `music_controller.bin` in an Actions artifact. The Actions ZIP also includes other binaries, a merged image and debugging/build files, so its size is not the application's size.
+
+For the current board/layout, a manual complete installation uses these public release files plus locally generated private settings:
+
+| File | Address | Purpose |
+| --- | --- | --- |
+| `waveshare-4.3-bootloader.bin` | `0x0` | Startup code |
+| `waveshare-4.3-partitions.bin` | `0x8000` | Flash layout |
+| `controller-nvs.bin` (private, generated locally) | `0x9000` | Wi-Fi, gateway URL/key and initial preferences |
+| `waveshare-4.3-otadata.bin` | `0xf000` | Application boot selection |
+| `waveshare-4.3-application.bin` | `0x20000` | Controller application |
+
+Use `release-manifest.json` as the authority for the chosen release's public component offsets and hashes. Private NVS is never a public release asset. An ordinary compatible application-only update preserves NVS; the installer also resets boot selection as needed. A complete erase requires provisioning settings again.
+
+Where supplied, `music-controller-full-flash.bin` combines the public firmware components for writing at `0x0`; restore private NVS afterward. v0.5.0 supplies separate binaries only, not a merged release image. The `.tar.gz` release assets contain gateway source or the browser prototype, not ESP32 firmware. See the [complete release asset guide](../../docs/releases.md).
+
+## Current features and limits
+
+Now Playing, Players, Providers, artwork, Queue, Browse and Search use separate full-screen views. Firmware supports playback/seek, 5% volume stepping, persisted player/provider and colour preferences, provider icons and backlight timeouts. Sonos Pause is disabled while playing; Stop is available. See [current project limits](../../README.md#current-limits).
+
+The bundled image appears during boot, while waiting for Wi-Fi, network time,
+the gateway or Music Assistant, and briefly before backlight-off. The current
+connection status is shown over the image; it blocks touches to the controls
+until Wi-Fi and the authenticated Music Assistant gateway session are ready.
+Connection loss covers any open view, and reconnecting restores that view.
+While the screen is on, waiting for connectivity or clock sync does not count
+toward the idle timeout. Once ready, the full configured timeout starts afresh.
+A disconnection during the two-second pre-sleep image cancels screen blanking.
+Background disconnections/reconnections do not wake an already dark screen.
+An unavailable player alone does not hide the player selector. Waking while
+offline restores the waiting screen and consumes the first touch as before. Auto power mode uses battery timing even on USB; choose USB/external manually for that timeout. This is backlight power saving, not deep sleep. Wireless OTA is not implemented.
+
+## Gateway prerequisite
+
+Deploy the [companion gateway](../../gateway/README.md) and a trusted HTTPS/WSS frontend. Music Assistant credentials stay on that host; the device receives a separate matching controller key. Wi-Fi DNS must resolve the WSS hostname and its certificate must be trusted by the ESP-IDF bundle. Enter **your own** URL, for example `wss://controller.example.net/controller/device/ws`; the manual provisioner's historical default is author-specific. Never bypass TLS verification.
+
+## Build from source
+
+Activate an installed ESP-IDF **v5.4.2** environment, then from the repository root:
+
+```sh
 . "$HOME/esp/esp-idf/export.sh"
 cd firmware/esp32
 idf.py set-target esp32s3
 idf.py build
-```
-
-The custom partition table reserves two 5 MB OTA slots for future rollback. Confirm board flash size and exact model before flashing.
-
-## First device installation
-
-After checking Waveshare SKU/PCB revision, flash size and data-capable USB port:
-
-```bash
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-Replace the port with the detected one. Expected serial log: `Music Controller firmware foundation`, ESP-IDF version and a notice that display/touch are not yet initialised. Exit monitor with Ctrl+].
+Substitute your serial port. The pinned BSP `bobscott45/waveshare_esp32_s3_touch_lcd_4_3@1.0.7` supplies display/touch pin assignments; LVGL is pinned to 8.3.11. Dependencies are in `main/idf_component.yml`. Exit monitor with Ctrl+]. Start with USB power and leave the battery disconnected until hardware/power suitability is confirmed.
 
-CI uploads bootloader, partition table, application binary, flash arguments and checksums as **workflow artifacts**, not GitHub Releases. The web prototype's `latest` release remains separate.
+CI builds the same IDF version and uploads bootloader, partition table, application, flash arguments, checksums and `music-controller-full-flash.bin` as an Actions artifact. Tagged releases also provide installer-compatible per-profile assets; their filenames differ from Actions artifacts.
 
-Next: confirm hardware, integrate exact Waveshare display/touch BSP and LVGL, show one focused 800×480 screen, then Wi-Fi/gateway and OTA. Never commit credentials or private network configuration.
+## Flash a prebuilt artifact (Windows)
 
-## Windows laptop: flash a prebuilt GitHub Actions artifact
-
-After CI succeeds, open the firmware workflow run in GitHub Actions and
-download its `music-controller-esp32s3-...` artifact ZIP. Extract it locally.
-Use the **USB-C port labelled USB** on the Waveshare board and a data-capable
-cable. Leave the battery disconnected for the initial test.
-
-Install Python 3 and the official Espressif flashing utility on Windows:
+Download the successful **ESP32 firmware** Actions run's `music-controller-esp32s3-...` ZIP and extract it. Connect the board's USB port with a data-capable cable and identify the COM port in Device Manager.
 
 ```powershell
 py -m pip install --upgrade esptool
+py -m esptool --chip esp32s3 --port COM5 flash-id
+py -m esptool --chip esp32s3 --port COM5 --baud 460800 write-flash 0x0 music-controller-full-flash.bin
 ```
 
-Identify the board's COM port in Windows Device Manager. From PowerShell in
-the extracted artifact directory, substitute the correct port:
+Confirm the correct board and **16 MB** flash before writing. If connection fails, hold BOOT while pressing RESET and retry. Flashing replaces the vendor demonstration firmware; back it up first if needed. Never write the application-only `music_controller.bin` at `0x0`; use the merged image there. The application partition starts at `0x20000` in this repository's partition table.
+
+## Provision private NVS
+
+Run locally from your checkout, with ESP-IDF v5.4.2 activated (`IDF_PATH` set):
+
+```sh
+python firmware/esp32/provision.py
+```
+
+On a Windows machine without the full toolchain, clone the v5.4.2 IDF source and install the NVS generator dependencies:
 
 ```powershell
-py -m esptool --chip esp32s3 --port COM5 flash_id
-py -m esptool --chip esp32s3 --port COM5 --baud 460800 write_flash 0x0 music-controller-full-flash.bin
+git clone --depth 1 --branch v5.4.2 https://github.com/espressif/esp-idf.git esp-idf-5.4.2
+$env:IDF_PATH=(Resolve-Path .\esp-idf-5.4.2).Path
+py -m pip install cryptography
+py firmware/esp32/provision.py
 ```
 
-The first command confirms a responding ESP32-S3 and detects flash capacity.
-**Only flash if the reported flash capacity is 16 MB** and the model matches
-the expected Waveshare ESP32-S3-LCD-4.3. If Windows cannot connect, hold
-BOOT while pressing RESET to enter download mode, then retry. Never use
-`erase_flash` for this first test.
+Enter Wi-Fi SSID/password, **your certificate-verified WSS gateway URL**, matching device token and optionally the exact MA player ID. Without a player ID, firmware selects an available player. The tool writes private `firmware/esp32/controller-nvs.bin` (24 KiB) containing Wi-Fi/device credentials. It is ignored by Git and must never be uploaded or attached to an issue.
 
-For serial logging, install an appropriate serial terminal or the ESP-IDF
-monitor. The separate USB-C port marked UART provides a USB-to-serial bridge;
-the USB port may expose the ESP32-S3's native USB serial/JTAG interface
-depending on the firmware configuration. The screen staying blank with this
-skeleton is **expected**.
+After flashing full firmware, flash NVS at `0x9000`:
 
-**Caution:** Flashing overwrites existing vendor demonstration firmware.
-If preserving the demo matters, back up flash first with esptool or obtain
-the official Waveshare recovery image.
+```powershell
+py -m esptool --chip esp32s3 --port COM5 write-flash 0x9000 firmware/esp32/controller-nvs.bin
+```
 
-## LCD + touch bring-up milestone
+Adjust paths if the extracted artifact and checkout are in different directories. **Full merged images may overwrite the NVS region: always flash private NVS afterwards.** Resetting the original NVS also restores its originally provisioned preferences; on-device player/provider choices made since then can be lost. Application-only updates can preserve NVS if written at the correct application offset.
 
-The next build uses the pinned third-party Waveshare 4.3-inch board support
-component `bobscott45/waveshare_esp32_s3_touch_lcd_4_3@1.0.7` and LVGL
-`8.3.11`. It initialises the RGB panel, GT911 touch and backlight, and
-shows a static **Now Playing** placeholder and a touchable button. This is
-a hardware bring-up image, not a connected media controller.
+## Wi-Fi power saving
 
-**Before flashing:** confirm the board is the **4.3-inch 800×480 GT911**
-variant (not the separate 4-inch 480×480 product). The previously flashed
-USB serial skeleton remains the recovery baseline. Leave the battery
-disconnected and power from USB.
+Wi-Fi modem sleep is **disabled by default** (`WIFI_PS_NONE`), on battery and
+USB, including while the backlight is off. The screen timeout does not disconnect
+Wi-Fi or suspend the gateway connection. Keeping the radio awake uses more power;
+battery runtime and sleep/wake connectivity need physical testing.
 
-CI must pass before downloading its merged flash image. After flashing,
-check for `LCD and LVGL initialised` in the serial log. Expected: a dark
-Now Playing screen and a button. Touch should show LVGL's pressed visual
-feedback; no music control commands are sent yet. Report any reset loop,
-white screen, touch offset or display flicker with the serial log.
+To explicitly enable modem sleep, set `wifi_sleep` in the `controller` NVS
+namespace to a `u8` value of `1`. This selects `WIFI_PS_MIN_MODEM`, which
+should maintain association while periodically sleeping the radio. Missing,
+zero, invalid or unreadable values select `WIFI_PS_NONE`. The setting is read at
+boot; restart after changing it. Startup logs report the selected mode.
 
-The component is pinned for repeatable builds. Board pin assignments are
-supplied by the BSP rather than copied into our application.
+The manual `provision.py` tool now asks “Enable Wi-Fi modem sleep to save power?”
+and defaults to No. For a manually maintained NVS CSV, the opt-in row is:
 
-## Connected Now Playing — private configuration
+```csv
+wifi_sleep,data,u8,1
+```
 
-**Do not use the Music Assistant `media` password on the device.**
-Atlas holds MA account credentials; the ESP32 receives a separate device token.
-Neither Wi-Fi credentials nor device token are built into public firmware or
-GitHub Actions artifacts.
+The Windows installer offers an unchecked **Enable Wi-Fi sleep** checkbox during
+new-device setup; CLI provisioning offers the same opt-in. Both write this key
+as 0 or 1. Normal updates preserve the stored setting. Existing NVS images need no changes for the new default: install an
+application-only firmware update to preserve credentials and preferences. Only
+regenerate/flash a private NVS image if deliberately changing provisioning;
+replacing NVS also replaces its other saved settings.
 
-1. Deploy the companion Atlas native-device gateway PR. On Atlas generate a
-   random token using `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-   and append `CONTROLLER_DEVICE_TOKEN=<token>` to the existing private
-   `/opt/atlas-secrets/music-controller.env`. Retain the `docker-secrets`
-   ownership/permissions and run normal Atlas deployment.
-2. On the Windows flashing computer, obtain ESP-IDF v5.4.2's NVS generator.
-   You can clone its source without installing the whole build toolchain:
-   `git clone --depth 1 --branch v5.4.2 https://github.com/espressif/esp-idf.git esp-idf-5.4.2`.
-   In PowerShell set `$env:IDF_PATH=(Resolve-Path .\\esp-idf-5.4.2).Path`.
-   Run `py firmware/esp32/provision.py` from the music-controller checkout.
-   Enter the Wi-Fi SSID/password, Atlas device token, and optionally the
-   Music Assistant player ID. The default URL is
-   `wss://music.theflat.me.uk/controller/device/ws`.
-   The generator may require the ESP-IDF Python NVS dependencies.
-3. The generator writes **private** `firmware/esp32/controller-nvs.bin`
-   (24 KiB). Never upload it or commit it.
-4. Flash the **full merged firmware image** at address `0x0` as before.
-   Then flash the private NVS partition at address `0x9000`:
+## Hardware acceptance and diagnostics
 
-   ```powershell
-   py -m esptool --chip esp32s3 --port COM4 write-flash 0x0 music-controller-full-flash.bin
-   py -m esptool --chip esp32s3 --port COM4 write-flash 0x9000 firmware/esp32/controller-nvs.bin
-   py -m serial.tools.miniterm COM4 115200
-   ```
+Verify live metadata, player selection across reset, transport/volume on the correct output, Providers → change → Save across reset, and recovery after Wi-Fi/gateway interruption. The outer screen never scrolls or stacks primary views.
 
-   Adjust paths and COM port to your actual directories. **Never** flash
-   `music_controller.bin` at `0x0`; it is only the application partition.
-5. With LAN split DNS configured, the device should show Wi-Fi connection,
-   gateway authentication, selected player and current track/artist. A
-   disconnected device retries Wi-Fi and WebSocket automatically.
+Use `idf.py monitor`, a serial terminal or `py -m serial.tools.miniterm COM5 115200` (requires pyserial) to inspect logs. Look for LCD/LVGL initialisation, DHCP, WebSocket handshake, `gateway/ready`, MA responses and heartbeat/reset reasons. A blank panel before networking points to display/board bring-up; connection failures need DNS/TLS/token/upstream checks. Never post the private NVS image or credentials with diagnostics.
 
-The first build defaults to the first available Music Assistant player. For a
-specific Sonos or Cast output, provide its exact MA `player_id` during NVS
-provisioning. The device validates Atlas's HTTPS certificate; do not disable
-certificate verification as a workaround for local DNS problems.
 
-**Important:** A full merged image can overwrite the NVS region. Provision
-after each full-flash operation. Future OTA application-only updates should
-preserve the NVS partition. The device token is shared by this initial device
-endpoint; rotate and reprovision if it is disclosed.
+## Ordinary manual updates
 
-### Acceptance before adding touch controls
+For an already provisioned board with the same partition layout, write only the application from the chosen successful Actions artifact to preserve NVS:
 
-- Boots without resets on the actual 4.3-inch 800×480 hardware.
-- Wi-Fi and certificate-verified WSS connection work.
-- Gateway rejects missing/wrong device tokens.
-- Real selected player and Now Playing metadata appear.
-- Changing playback from Music Assistant/Symfonium updates the display.
-- Restarting Atlas or Wi-Fi recovers without reflashing.
-- No MA account password or Wi-Fi credentials are committed.
+```powershell
+py -m esptool --chip esp32s3 --port COM5 --baud 460800 write-flash 0x20000 music_controller.bin
+```
 
-This is a first vertical slice, not yet feature parity with the HTML controller.
+Use the installer update mode for tagged release assets. A full merged flash can replace NVS; restore your private NVS afterward. Changing partition layouts requires explicit migration/recovery instructions rather than assuming an application-only update is compatible.
 
-## Diagnostic firmware (blank display / stalled gateway)
+## Development and rendering
 
-The diagnostic build logs each stage to serial without printing SSID passwords,
-device tokens or other credentials. A visible dark-blue screen with white
-Music Controller heading, player, track and green status is created before
-Wi-Fi setup. State changes are rendered by the main task, rather than calling
-LVGL directly from Wi-Fi/WebSocket callbacks.
+Follow [firmware AGENTS.md](AGENTS.md) and [development checks](../../docs/development.md). Historical investigations and milestone notes are preserved in [firmware history](../../docs/firmware-history.md); they are not current installation instructions.
 
-Look for `Diagnostic screen created`, `Wi-Fi starting association`,
-`DHCP address`, `Starting WSS connection`, `WebSocket handshake completed`,
-`Gateway authenticated and ready`, and repeating `Heartbeat` lines.
-If the serial log reports the screen created but the physical panel is still
-blank, treat it as an LCD/LVGL rendering issue independent of networking.
+## Buffered presentation and startup loading page
 
-**Flashing:** Download the successful ESP32 firmware Actions artifact for
-this commit. Flash the **merged** `music-controller-full-flash.bin` at `0x0`.
-Because a merged image includes the NVS flash region, **reflash the existing
-private `controller-nvs.bin` at `0x9000` immediately afterwards**. No need
-to regenerate the NVS image or change its credentials. Then restart and
-capture serial output for at least 30 seconds. Never publish the NVS image.
+The pinned BSP allocates one full logical drawing buffer and two RGB panel buffers
+in PSRAM (three 768,000-byte buffers, about 2.20 MiB), with portrait rotation and
+anti-tearing mode 3. `controller_display.c` replaces its rotated LVGL flush and RGB
+completion callback after BSP initialization; hardware pins, touch rotation and
+the LVGL task remain provided by BSP 1.0.7. No managed component is modified.
 
-## WebSocket response reassembly fix
+The adapter rotates dirty rectangles in 16×16 tiles. Both external-memory reads
+and writes are contiguous within each tile, rather than scattering each pixel
+across PSRAM cache lines. It submits only after LVGL's last dirty area, then waits
+for safe retirement before copying the changed native rows into the old buffer.
+The logical canvas is never submitted as a landscape panel buffer.
 
-The first connected hardware test established Wi-Fi, TLS, WebSocket and
-`gateway/ready`, but large `players/all` and `player_queues/all` replies
-were silently dropped. This revision assembles fragmented WebSocket text
-messages in bounded PSRAM (128 KiB maximum), logs fragment lengths and
-completed response counts, reports API errors and refreshes periodically.
-Messages larger than the bound are rejected rather than risking memory use.
+IDF 5.4.2's bounce-frame callback reports when a complete source frame has been
+copied to DMA, not which framebuffer was selected. A callback already in flight
+on the other core can arrive around submission. The adapter drains notifications
+**after** submission and waits for two subsequent completion events before
+reusing the old buffer. It accepts the additional latency (up to roughly two
+panel periods in normal operation) to avoid writing pixels still being consumed.
+Each wait has a one-second timeout that fails explicitly rather than silently
+reusing an unsafe buffer. Sparse control updates still render only dirty regions.
 
-After CI succeeds, flash the new **merged** firmware image at `0x0`, then
-reflash your **existing private** `controller-nvs.bin` at `0x9000`.
-No configuration changes are required. Observe `MA request p`, `WS frame`,
-`WS message assembled` and `MA response p/q` in the serial monitor.
+The panel clock is requested at 12 MHz instead of the BSP's 14 MHz; nominal refresh
+is about 29 Hz with the BSP porch timings (the divider may round the clock). Two
+20-line internal DMA bounce buffers use about 62.5 KiB total, 31.25 KiB more than
+the previous 10-line default. The data-cache line is 64 bytes, compiler optimization
+is performance (-O2), and instructions execute and read-only data is read from PSRAM so NVS
+writes do not disable the display's external-memory cache. PSRAM instruction/data
+placement costs additional external RAM; the firmware retains the 64 KiB internal
+allocation reserve. Stale configuration fails compilation: regenerate sdkconfig
+from defaults, or apply all new settings before rebuilding.
 
-## Native touchscreen milestone — Now Playing and Players
+This follows ESP-IDF's [RGB bandwidth/cache guidance](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/api-reference/peripherals/lcd/rgb_lcd.html#bounce-buffer-with-single-psram-frame-buffer).
+The physical symptom was a vertically shifted/repeated image during navigation,
+which is consistent with scanout starvation. Buffer ownership and retirement are
+also hardened; physical testing is needed to establish whether all observed
+flicker is eliminated. No unconditional per-VSYNC restart workaround is enabled.
 
-The ESP32 now has two **mutually exclusive, full-viewport LVGL screens**:
-Now Playing and Player Selection. The 800×480 display never stacks views,
-and only the player list scrolls. Queue, Browse and Search remain future
-separate screens; they are **not** mixed into Now Playing.
+Rendering rules for future changes:
 
-- **Now Playing:** player name is a large touch target opening Player
-  Selection; track/artist, Play/Pause, Previous, Next, Stop, and 10-point
-  volume decrement/increment are displayed.
-- **Player Selection:** a dedicated list of Music Assistant players, with a
-  Back button to Now Playing. Selecting a player returns immediately to Now
-  Playing and requests its live state.
-- The selected player ID is persisted under `controller/player_id` in NVS,
-  so subsequent restarts retain the selection. The initial ID provisioned
-  via `provision.py` remains the default on first boot.
-- Touch events enqueue actions for the firmware main task; the LVGL task
-  does not perform network operations. Responses from Music Assistant
-  remain authoritative for playback state and volume.
-- **Sonos Pause is disabled while playing** because of the previously
-  observed queue-hopping behaviour (Atlas #587). Stop remains available.
-- Player control commands use the existing allowlisted Atlas gateway; no
-  new Music Assistant credentials or gateway deployment are required.
+- Build screen/menu/dialog and substantial content changes in one LVGL transaction:
+  on the LVGL task, or under `lvgl_port_lock` from application tasks. Finish the
+  entire change before unlocking. Screen navigation invalidates the complete root.
+- Keep button feedback, selection, typing, search results and playback progress on
+  the same buffered presentation path. Dirty-region rendering avoids repainting
+  unrelated artwork; it does not permit writes into the active panel buffer.
+- Do not clear the visible panel, draw directly with panel APIs, or manually swap
+  buffers from UI code. The adapter owns rotation, synchronization and retirement.
+- Do not force intermediate refreshes during a transition. Keep `lv_refr_now` on
+  the BSP LVGL task; the upstream BSP's flush relies on task-specific notifications.
+- Skip unchanged text updates. Download assets outside UI locks and apply complete,
+  validated assets inside one transaction.
 
-### Flash and acceptance
+Startup presents the bundled Loading splash before building the main UI and saved
+appearance in one locked transaction. The loading frame stays visible until the
+completed main frame is prepared. The same overlay then presents connection
+status until the gateway has completed its Music Assistant handshake. It uses the
+bundled image without waiting for a network download. Later view transitions
+retain the previous frame; connection loss covers all views with the waiting
+overlay. No gateway, contract, configuration or Atlas release-pin update is required.
 
-Download the successful ESP32 Actions artifact for this PR. Flash
-`music-controller-full-flash.bin` at `0x0`, then reflash your **existing**
-private `controller-nvs.bin` at `0x9000`. The merged image overwrites NVS,
-so preserve this order. No regeneration of your device token or Wi-Fi
-credentials is needed.
+WebSocket Ping/Pong control frames bypass the JSON assembler and do not discard a
+partial message. Individual fragment logs use DEBUG rather than INFO; assembled
+message sizes and response summaries remain visible.
 
-Verify on the Waveshare: Now Playing shows the previously selected player;
-tapping its name replaces the entire screen with the player list; Back
-returns to Now Playing; selecting another player updates metadata and
-survives RESET; Stop, Next, Previous, Play and volume reach the correct
-player. Confirm Sonos Pause remains unavailable while playing, and no
-network or player list appears behind the active screen.
-
-The source has not yet been hardware-tested for this milestone; review CI
-and serial logs before considering it validated.
-
-## Music Provider selection and 5% volume stepping
-
-A dedicated full-screen **Music Providers** view is accessible from Now
-Playing. It uses Music Assistant's provider listing through the Atlas gateway
-(companion Atlas PR required), excludes non-music integrations, and presents
-checkboxes for available music sources. All are selected by default until the
-first user change. The selected provider IDs are stored independently of
-the output player ID in NVS under `controller/music_sources`. An intentionally
-empty selection is preserved.
-
-**Scope:** This milestone implements provider **discovery and selection**.
-Browse and Search screens and their provider-filtered API calls are roadmap
-follow-ups; the selection screen explicitly says so rather than claiming
-filters are already applied. Validate the installed Music Assistant version's
-provider listing response and `type=music`/instance ID fields during hardware
-testing. An API error must not be treated as an empty list.
-
-Volume touch controls use **5% boundaries**. The first upward press at 12%
-goes to 15%; the first downward press goes to 10%. From exactly 15%, the next
-press goes to 20% or 10% respectively. Values clamp at 0–100%. The UI reads
-back Music Assistant's reported volume; it does not assume a command succeeded.
-
-**Deploy order:** merge and deploy the companion Atlas gateway PR before
-flashing the firmware. Flash the full merged firmware image, then the
-existing private NVS image at `0x9000`. The first provider change is saved
-on-device and survives subsequent resets; re-flashing the full merged image
-and NVS resets the choice to the provisioned image's state.
-
-## Native Queue (full-screen focus)
-
-The **Queue** button on Now Playing opens a dedicated 800×480 Queue screen;
-it **replaces**, rather than overlays, Now Playing. Only the list scrolls.
-Back returns to Now Playing; the selected output player stays unchanged.
-
-The Queue screen requests `player_queues/items` from the authenticated Atlas
-gateway with the selected player's queue ID, a bounded page size of 30, and
-a page offset. Rows show title/artist and highlight the current queue index.
-Tapping a row sends `player_queues/play_index` with that queue ID and the
-absolute index. Previous/Next page controls move through longer queues.
-Empty, disconnected, loading and API-error states are surfaced. Queue
-state is cleared when the selected output player changes; responses for
-stale player/page requests are discarded.
-
-The Queue is **not** filtered by selected music providers: it reflects the
-selected player's actual playback queue, regardless of source. Browse and
-Search will later respect the provider checkbox selection.
-
-### Hardware acceptance
-
-- Open Queue from Now Playing; confirm no underlying Now Playing controls
-  remain visible and Back returns to Now Playing.
-- With an empty queue, confirm the empty state.
-- Populate a queue using Music Assistant; confirm titles and artist names.
-- Tap a queued track; confirm the correct item plays on the selected player.
-- Switch player and reopen Queue; confirm no stale tracks remain.
-- Test Previous/Next page with more than 30 tracks and current-track marking.
-- Disconnect/reconnect Wi-Fi; verify the view recovers.
-- Verify serial logs and no watchdog resets.
-
-After CI succeeds, flash the merged `music-controller-full-flash.bin` at
-`0x0`, then your **existing private** `controller-nvs.bin` at `0x9000`.
-No Atlas gateway changes are needed: both queue commands are already
-allowlisted. On-device testing is still required before marking complete.
-
-## Provider checkbox reset investigation
-
-On hardware, the provider list loads but tapping a checkbox reportedly blanks
-the screen, returns to Now Playing, and fails to retain the choice. The
-exact reset reason has not yet been captured.
-
-This patch **separates checkbox changes from flash writes**. Tapping a
-checkbox only changes in-memory selection; pressing **Save** explicitly
-persists the selected provider IDs to NVS. A confirmation appears on the
-Providers screen. The firmware logs checkbox transitions and the ESP32 reset
-reason at startup, so a remaining crash can be diagnosed rather than guessed.
-The provider screen remains exclusive and full-screen.
-
-Hardware acceptance: open Providers, uncheck one, confirm the screen remains
-visible, press Save, confirm the success label, return via Back, reopen and
-verify the selection; then press RESET and verify it persists. If the device
-reboots, capture the serial log including `Boot reset reason`, any panic
-backtrace and the final checkbox/save event. Avoid posting device tokens.

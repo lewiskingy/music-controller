@@ -1,0 +1,39 @@
+name: Enclosure CAD and renders
+on:
+  push:
+    branches: [main]
+    tags: ['enclosure-v*']
+    paths:
+      - 'hardware/enclosure/**'
+      - '.github/workflows/enclosure.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    uses: ./.github/workflows/enclosure-build.yml
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/enclosure-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: controller-enclosure-${{ github.sha }}
+          path: dist/enclosure
+      - name: Publish versioned hardware release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^enclosure-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected enclosure-vX.Y.Z'; exit 1; }
+          gh release create "$TAG" --verify-tag --latest=false \
+            dist/enclosure/print-package.zip dist/enclosure/print-package.zip.sha256 dist/enclosure/SHA256SUMS \
+            dist/enclosure/case.png dist/enclosure/docked.png \
+            dist/enclosure/assembled.png dist/enclosure/exploded.png dist/enclosure/rear.png \
+            --title "Enclosure $TAG" \
+            --notes 'Printable ESP32-S3-Touch-LCD-4.3 portrait case and keyed charging cradle. Includes STL/STEP, PNG previews and assembly instructions. CAD validated; physical fit, battery and contact hardware require checking. See hardware/enclosure/README.md.'
