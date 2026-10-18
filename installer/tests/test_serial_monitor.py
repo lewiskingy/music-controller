@@ -19,7 +19,7 @@ def test_stop_releases_port_before_flash():
             self.is_open = True
         def read(self, size):
             time.sleep(.01)
-            return b"I controller: ready\\n"
+            return b"I controller: ready\n"
         def close(self):
             self.is_open = False
 
