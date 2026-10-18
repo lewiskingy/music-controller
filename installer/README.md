@@ -100,3 +100,8 @@ This mode avoids automatic resets **between** esptool operations, but still
 reopens the COM port. If Windows denies access, close other COM-port owners and
 record the failing USB stage and OS error for troubleshooting. Do not use
 **Set up new device** unless you intend to erase and provision NVS.
+
+
+## Serial Monitor
+
+Expand **Serial Monitor · Diagnostics** and choose **Start monitoring** on the selected COM port to watch 115200-baud device logs. Copy, clear or save the bounded log as needed. Before a USB flash, the monitor closes the port and resumes afterwards if it was running. Other serial-monitor applications must be closed before flashing. Saved logs may contain sensitive network information.
