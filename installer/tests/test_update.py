@@ -27,7 +27,7 @@ def test_latest_stable_and_digest_required():
                     "digest": "sha256:" + "a" * 64}],
     }
     with patch.object(update, "VERSION", "0.5.6"), patch.object(update.sys, "frozen", True, create=True), patch.object(update.core, "download",
-            return_value=__import__("json").dumps(release).encode()):
+            side_effect=lambda *args, **kwargs: __import__("json").dumps(release).encode()):
         assert update.release_info()["version"] == "v0.5.7"
         release["assets"][0]["digest"] = ""
         assert update.release_info() is None
