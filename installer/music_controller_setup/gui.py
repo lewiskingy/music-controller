@@ -17,8 +17,8 @@ class Installer:
         self.data = None
         self.available = []
         root.title(f"Music Controller Setup {update.VERSION}")
-        root.geometry("720x740")
-        root.minsize(680, 740)
+        root.geometry("720x780")
+        root.minsize(680, 780)
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
@@ -33,6 +33,11 @@ class Installer:
         mode = ttk.Combobox(frame, textvariable=self.mode, state="readonly", values=["Update existing device", "Set up new device"])
         mode.pack(fill="x", pady=8)
         self.controls.append(mode)
+        self.manual_bootloader = tk.BooleanVar(value=False)
+        manual = ttk.Checkbutton(frame, text="Manual BOOT mode (battery powered / reset issues)",
+                                 variable=self.manual_bootloader)
+        manual.pack(anchor="w")
+        self.controls.append(manual)
         self.settings = {}
         form = ttk.Frame(frame)
         form.pack(fill="x", pady=8)
@@ -199,6 +204,7 @@ class Installer:
         profile = self.data["profiles"][self.profile.current()]
         full = self.mode.get() == "Set up new device"
         settings = {key: value.get() for key, value in self.settings.items()} if full else None
+        manual_bootloader = self.manual_bootloader.get()
         try:
             core.validate_profile(profile)
             if full:
@@ -217,6 +223,13 @@ class Installer:
             if full and not messagebox.askokcancel("Private files", "The prepared NVS file contains your Wi-Fi password and gateway key. Keep this folder private."):
                 return
         else:
+            if manual_bootloader and not messagebox.askokcancel(
+                "Enter download mode",
+                "Keep USB connected. Hold BOOT, briefly press and release RESET, "
+                "then release BOOT. Close any serial monitor.\\n\\n"
+                "Press OK only when the controller is in download mode. "
+                "The installer will not reset the board between flashing steps."):
+                return
             if self.port.current() < 0:
                 return messagebox.showerror("USB port", "Connect your device and refresh USB ports.")
             port = self.devices[self.port.current()][0]
@@ -233,9 +246,12 @@ class Installer:
                     core.provision(settings, profile, target)
                 if not prepare_only:
                     self.events.put((None, "Flashing device; keep USB connected…"))
-                    core.flash(profile, target, port, full, log=lambda message: self.events.put((None, message)))
+                    core.flash(profile, target, port, full, log=lambda message: self.events.put((None, message)),
+                               manual_bootloader=manual_bootloader)
             return f"Prepared: {destination}. Keep NVS private." if prepare_only else "Installation complete. Temporary files removed."
-        self.task(work, lambda result: self.status.set(result))
+        self.task(work, lambda result: (self.status.set(result),
+            messagebox.showinfo("Manual restart", "Flash completed. Press RESET (without BOOT) to run the firmware.")
+            if manual_bootloader and not prepare_only else None))
 
     def close(self):
         if self.busy:

@@ -80,3 +80,23 @@ python installer/setup.py --self-test
 ```
 
 On Windows, install `pyinstaller==6.16.0` and run the packaging commands in `.github/workflows/installer.yml`. That workflow uploads the executables for PR review before tagging. The frozen CLI self-test imports the bundled tools and generates a real NVS partition without network or hardware. Physical acceptance still requires a Windows PC and board: full provisioning, update preserving settings, release/port selection, BOOT recovery, gateway authentication and cleanup after a failed write.
+
+
+## Battery-powered boards: manual download mode
+
+If the ESP32-S3 is powered continuously by a battery, USB attachment might not
+reset the processor into its ROM bootloader. If the normal USB update reports
+`No serial data received` or fails on a second connection, choose **Manual BOOT
+mode (battery powered / reset issues)** in the installer.
+
+Keep the battery and USB connected; hold **BOOT**, briefly press and release
+**RESET**, then release **BOOT**. Close external COM-port monitors before flashing.
+Confirm **Update existing device** to preserve NVS settings. In manual mode the
+installer uses 115200 baud and `--before no-reset --after no-reset` for both
+partition verification and firmware writing. It deliberately leaves the board
+in download mode; press RESET without BOOT after successful installation.
+
+This mode avoids automatic resets **between** esptool operations, but still
+reopens the COM port. If Windows denies access, close other COM-port owners and
+record the failing USB stage and OS error for troubleshooting. Do not use
+**Set up new device** unless you intend to erase and provision NVS.

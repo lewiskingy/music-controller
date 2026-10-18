@@ -204,7 +204,7 @@ def test_windows_gui_initialization(package):
             assert app.mode.get() == "Update existing device"
             assert app.status.get().startswith("Ready")
             assert app.settings["wifi_sleep"].get() is False
-            assert root.winfo_reqheight() <= 740
+            assert root.winfo_reqheight() <= 780
     finally:
         root.destroy()
 
@@ -246,3 +246,27 @@ def test_usb_stage_progress_is_exposed(package):
     with patch("esptool.main", side_effect=device_stub(path, calls)):
         core.flash(profile, path, "COM4", log=stages.append)
     assert stages == ["Read partition table…", "Write firmware…"]
+
+
+def test_manual_bootloader_preserves_download_mode_between_flash_operations(package):
+    path, profile = package
+    calls = []
+    with patch("esptool.main", side_effect=device_stub(path, calls)):
+        core.flash(profile, path, "COM4", manual_bootloader=True)
+    assert len(calls) == 2
+    for args in calls:
+        assert args[args.index("--baud") + 1] == "115200"
+        assert args[args.index("--before") + 1] == "no-reset"
+        assert args[args.index("--after") + 1] == "no-reset"
+        assert "erase_flash" not in args
+        assert "0x9000" not in args
+    assert "read_flash" in calls[0] and "write_flash" in calls[1]
+
+
+def test_normal_flash_keeps_default_reset_behaviour(package):
+    path, profile = package
+    calls = []
+    with patch("esptool.main", side_effect=device_stub(path, calls)):
+        core.flash(profile, path, "COM4")
+    assert all("--before" not in call and "--after" not in call for call in calls)
+    assert all(call[call.index("--baud") + 1] == "460800" for call in calls)
