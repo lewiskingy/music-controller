@@ -100,7 +100,7 @@ def begin_update(path):
 
 
 def apply_update(destination, old_pid):
-    """Called only by staged executable. Never allow arbitrary replacement targets."""
+    """Launch external Windows helper; running EXEs cannot reliably replace themselves."""
     if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return 1
     source = Path(sys.executable).resolve()
@@ -109,26 +109,31 @@ def apply_update(destination, old_pid):
         return 1
     if not source.parent.name.startswith("music-controller-update-"):
         return 1
-    # No deletion first: use atomic replacement on the same volume where possible.
-    for _ in range(120):
-        try:
-            os.replace(source, destination)
-            subprocess.Popen([str(destination)], close_fds=True,
-                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-            return 0
-        except PermissionError:
-            time.sleep(0.25)
-        except OSError:
-            # Cross-volume fallback: stage next to destination and atomically rename.
-            try:
-                temporary = destination.with_name(destination.name + ".new")
-                temporary.write_bytes(source.read_bytes())
-                os.replace(temporary, destination)
-                subprocess.Popen([str(destination)], close_fds=True,
-                                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-                return 0
-            except PermissionError:
-                time.sleep(0.25)
-            except OSError:
-                break
-    return 1
+    if old_pid is None or old_pid <= 0:
+        return 1
+    # This process and the old installer both need to exit before Windows will
+    # allow replacement. PowerShell is only a small local handoff helper.
+    helper = source.parent / "finish-update.ps1"
+    helper.write_text("""
+param([string]$Source, [string]$Destination, [int]$OldPid, [int]$StagedPid)
+foreach ($id in @($OldPid, $StagedPid)) {
+    try { Wait-Process -Id $id -Timeout 45 -ErrorAction Stop }
+    catch { }
+}
+$success = $false
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+        $success = $true
+        break
+    } catch { Start-Sleep -Milliseconds 500 }
+}
+if ($success) { Start-Process -FilePath $Destination }
+""", encoding="utf-8")
+    subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(helper), "-Source", str(source),
+         "-Destination", str(destination), "-OldPid", str(old_pid),
+         "-StagedPid", str(os.getpid())],
+        close_fds=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    return 0
