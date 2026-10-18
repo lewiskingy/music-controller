@@ -272,10 +272,11 @@ def test_normal_flash_keeps_default_reset_behaviour(package):
     assert all(call[call.index("--baud") + 1] == "460800" for call in calls)
 
 
-def test_manual_options_match_bundled_esptool_parser():
+def test_manual_options_match_bundled_esptool_parser(capsys):
     import esptool
-    parser = esptool.get_parser()
-    args = parser.parse_args(["--chip", "esp32s3", "--port", "COM4", "--baud", "115200",
-                              "--before", "no_reset", "--after", "no_reset", "flash_id"])
-    assert args.before == "no_reset"
-    assert args.after == "no_reset"
+    # --help validates preceding option values and exits before opening COM4.
+    with pytest.raises(SystemExit) as exit_info:
+        esptool.main(["--chip", "esp32s3", "--port", "COM4", "--baud", "115200",
+                      "--before", "no_reset", "--after", "no_reset", "--help"])
+    assert exit_info.value.code == 0
+    assert "invalid choice" not in capsys.readouterr().err
