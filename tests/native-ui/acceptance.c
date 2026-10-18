@@ -566,6 +566,23 @@ int main(int argc,char **argv) {
     CHECK(!controller_splash_visible());
     CHECK(lv_obj_get_style_bg_img_src(ui.root,0)==NULL);
     screenshot("after-boot-splash"); geometry();
+    /* Connection failures cover every view and intercept control touches. */
+    const char *waiting[]={"Wi-Fi reconnecting", "Authenticating...", "Waiting for Music Assistant"};
+    for(unsigned i=0;i<3;i++) {
+        controller_ui_show(&ui,i==1 ? UI_SEARCH : UI_PLAYING);
+        controller_splash_status(waiting[i]);
+        CHECK(controller_splash_visible());
+        lv_obj_t *cover=lv_obj_get_child(lv_layer_top(),-1);
+        lv_obj_t *caption=lv_obj_get_child(cover,1);
+        CHECK(!strcmp(lv_label_get_text(caption),waiting[i]));
+        controller_splash_status(waiting[i]);
+        CHECK(lv_obj_get_child(lv_layer_top(),-1)==cover);
+        before=intent_count; click(ui.volume_up); CHECK(intent_count==before);
+        screenshot(i==0?"waiting-wifi":i==1?"waiting-gateway":"waiting-music-assistant");
+    }
+    controller_splash_status(NULL);
+    CHECK(!controller_splash_visible());
+    before=intent_count; click(ui.volume_up); CHECK(intent_count==before+1);
     controller_splash_show(false);
     CHECK(controller_splash_visible());
     screenshot("before-sleep-splash");
@@ -596,3 +613,4 @@ int main(int argc,char **argv) {
     free(album_packet); free(generic_packet);
     return 0;
 }
+

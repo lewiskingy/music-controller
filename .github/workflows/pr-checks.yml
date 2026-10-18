@@ -1,0 +1,70 @@
+name: Pull request checks
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      firmware: ${{ steps.select.outputs.firmware }}
+      gateway: ${{ steps.select.outputs.gateway }}
+      prototype: ${{ steps.select.outputs.prototype }}
+      installer: ${{ steps.select.outputs.installer }}
+      enclosure: ${{ steps.select.outputs.enclosure }}
+      release: ${{ steps.select.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python -m unittest discover -s tests/ci -v
+      - id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/pr_checks.py select
+  firmware:
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    uses: ./.github/workflows/firmware.yml
+  gateway:
+    needs: changes
+    if: needs.changes.outputs.gateway == 'true'
+    uses: ./.github/workflows/gateway.yml
+  prototype:
+    needs: changes
+    if: needs.changes.outputs.prototype == 'true'
+    uses: ./.github/workflows/prototype.yml
+  installer:
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    uses: ./.github/workflows/installer.yml
+  enclosure:
+    needs: changes
+    if: needs.changes.outputs.enclosure == 'true'
+    uses: ./.github/workflows/enclosure-build.yml
+  release:
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==8.4.2
+      - run: python -m pytest tests/release -q
+  gate:
+    name: PR checks
+    if: always()
+    needs: [changes, firmware, gateway, prototype, installer, enclosure, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require all selected checks to succeed
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: python scripts/pr_checks.py verify

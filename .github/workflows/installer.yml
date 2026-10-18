@@ -1,7 +1,5 @@
 name: Windows installer
 on:
-  pull_request:
-    paths: ['installer/**', '.github/workflows/installer.yml', '.github/workflows/release-prototype.yml']
   push:
     branches: [main]
     paths: ['installer/**', '.github/workflows/installer.yml']

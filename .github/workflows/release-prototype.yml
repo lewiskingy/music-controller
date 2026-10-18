@@ -9,11 +9,6 @@ on:
         description: 'Optional vMAJOR.MINOR.PATCH override (blank = refresh rolling draft or next patch)'
         type: string
         default: ''
-  pull_request:
-    paths:
-      - '.github/workflows/**'
-      - 'scripts/prepare_release.py'
-      - 'tests/release/**'
 permissions:
   contents: read
 # Serialize version allocation through upload, including manual/tag runs.
