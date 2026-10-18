@@ -14,7 +14,7 @@ docker compose --env-file gateway/.env.example -f gateway/compose.yml --profile 
 docker build -t music-controller-gateway:local gateway
 ```
 
-The firmware guide documents the real ESP-IDF v5.4.2 build. Python source-contract tests check intended firmware/UI structure; passing them does not replace a compiler build or on-device acceptance. Gateway tests exercise actual authentication/validation/relay via aiohttp test servers, without real music playback.
+The firmware guide documents the real ESP-IDF v5.4.2 build. The Windows packaging workflow uses Python 3.11 to exercise Tk initialization on GitHub's Windows runner. Python source-contract tests check intended firmware/UI structure; passing them does not replace a compiler build or on-device acceptance. Gateway tests exercise actual authentication/validation/relay via aiohttp test servers, without real music playback.
 
 ## Pull request checks
 
