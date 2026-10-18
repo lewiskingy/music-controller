@@ -18,7 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11.14'
+      - name: Verify Tcl/Tk runtime availability
+        shell: pwsh
+        run: |
+          python -c "import tkinter as tk; from pathlib import Path; root=tk.Tk(); print('Tk version:', root.tk.call('info', 'patchlevel')); root.destroy()"
       - run: python -m pip install -r installer/requirements.txt pyinstaller==6.16.0 pytest==8.4.2
       - name: Embed installer version
         env:
