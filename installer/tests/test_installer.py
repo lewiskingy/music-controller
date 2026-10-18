@@ -149,7 +149,7 @@ def test_bundled_runtime_self_test():
 
 def test_flash_tool_failure_is_actionable(package):
     path, profile = package
-    with patch("esptool.main", side_effect=SystemExit(2)), pytest.raises(core.SetupError, match="download mode"):
+    with patch("esptool.main", side_effect=SystemExit(2)), pytest.raises(core.SetupError, match="bootloader mode"):
         core.flash(profile, path, "COM4")
 
 
