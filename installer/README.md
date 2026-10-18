@@ -80,3 +80,22 @@ python installer/setup.py --self-test
 ```
 
 On Windows, install `pyinstaller==6.16.0` and run the packaging commands in `.github/workflows/installer.yml`. That workflow uploads the executables for PR review before tagging. The frozen CLI self-test imports the bundled tools and generates a real NVS partition without network or hardware. Physical acceptance still requires a Windows PC and board: full provisioning, update preserving settings, release/port selection, BOOT recovery, gateway authentication and cleanup after a failed write.
+
+
+## Serial Monitor (Windows GUI)
+
+The expandable **Serial Monitor · Diagnostics** section reads the selected COM port at
+115200 baud. Select **Show logs**, then **Start monitoring** to follow firmware boot,
+Wi-Fi and gateway messages without separate terminal software. You can copy,
+clear or save the bounded log (last 1,500 lines). The monitor retries automatically
+if the USB serial port temporarily disappears. The monitor opens the port without
+asserting DTR/RTS to minimise unintended controller resets.
+
+When flashing starts, the monitor stops and releases the COM port before esptool
+connects; after flashing (including failures) it resumes if previously active.
+The monitor never opens the port automatically merely by starting the installer.
+Close any *external* serial-monitor software before flashing: Windows cannot
+share an active COM port between unrelated processes.
+
+Saved logs can include network identifiers, gateway details or other diagnostics.
+Review and redact sensitive information before sharing them.
