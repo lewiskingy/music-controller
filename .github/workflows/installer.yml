@@ -26,25 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RELEASE_VERSION.TrimStart('v')
-          if ($version -notmatch '^\\d+\\.\\d+\\.\\d+
-      - name: Build self-contained executables
-        run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name music-controller-setup --paths installer --add-data "LICENSE:licensing" --add-data "NOTICE:licensing" --add-data "THIRD_PARTY.md:licensing" --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
-          python -m PyInstaller --noconfirm --clean --onefile --console --name music-controller-cli --paths installer --add-data "LICENSE:licensing" --add-data "NOTICE:licensing" --add-data "THIRD_PARTY.md:licensing" --collect-all esptool --collect-all esp_idf_nvs_partition_gen --collect-all serial installer/setup.py
-      - name: Smoke test frozen runtime
-        run: dist/music-controller-cli.exe --self-test
-      - name: Include licence and attribution with installer downloads
-        run: Copy-Item LICENSE, NOTICE, THIRD_PARTY.md dist/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: music-controller-windows
-          path: |
-            dist/music-controller-*.exe
-            dist/LICENSE
-            dist/NOTICE
-            dist/THIRD_PARTY.md
-          if-no-files-found: error
-) { throw "Invalid installer version" }
+          if ($version -notmatch '^[0-9]+[.][0-9]+[.][0-9]+$') { throw "Invalid installer version" }
           Set-Content installer/music_controller_setup/_build_version.py "VERSION = '$version'" -Encoding utf8
       - run: python -m pytest installer/tests -q
       - name: Build self-contained executables
