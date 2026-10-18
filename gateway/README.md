@@ -9,7 +9,7 @@ For the complete installation sequence, follow [Getting Started](../docs/getting
 - Docker with Compose v2, or Python 3.12 for local development.
 - A Music Assistant server that supports the existing `auth/login` → `auth` WebSocket flow and commands in `app.py`.
 - A dedicated non-admin Music Assistant account and network access from the container to its WebSocket port (commonly 8095).
-- For ESP32 use, a trusted HTTPS/WSS frontend reachable over Wi-Fi. The physical device requires certificate verification; plain WS is only suitable for local browser/development checks.
+- For ESP32 use, a trusted HTTPS/WSS frontend reachable over Wi-Fi. The physical device requires certificate verification; plain WS is only suitable for local development checks.
 
 No specific Music Assistant release is certified by this copy. Validate authentication and commands against your installed server before relying on them; unit/integration tests use a simulated server.
 
@@ -31,7 +31,7 @@ Edit `.env`, replace the password/token placeholders and choose your Music Assis
 | MA_WS_URL | Complete upstream WebSocket URL, e.g. `http://host.docker.internal:8095/ws`; `ws://`/`wss://` also supported by aiohttp |
 | MA_USERNAME / MA_PASSWORD | Dedicated Music Assistant account; required at startup |
 | CONTROLLER_DEVICE_TOKEN | Random shared device credential; empty disables the device endpoint when running Python directly |
-| CONTROLLER_HOST | Hostname for the optional Caddy frontend; must match the origin and resolve to your host |
+| CONTROLLER_HOST | Hostname for the optional Caddy frontend; must resolve to your host |
 | CONTROLLER_BIND_IP | Host interface for the optional HTTPS frontend; default loopback, set to your server's LAN address for devices |
 
 `host.docker.internal` is mapped to the Docker host by the example Compose file. For Music Assistant on another machine use that machine's DNS name/address instead. If your firewall blocks Docker-to-host connections, permit only the gateway's network/address to the MA port; a healthy container alone does not prove upstream connectivity.
@@ -62,10 +62,9 @@ Set `CONTROLLER_HOST` and `CONTROLLER_BIND_IP` before starting the optional Cadd
 
 1. Missing/wrong device tokens must receive HTTP 403 before the WebSocket upgrade.
 2. A valid device token should receive `gateway/ready`, then a `players/all` reply. If login fails, expect `gateway/error` and a closed session.
-3. The browser must be served from exactly `CONTROLLER_ORIGIN`; a different origin is rejected.
-4. Check actual player metadata, transport and recovery after restarting the gateway. Test commands on the installed MA version; Sonos Pause remains disabled in the clients.
+3. Check actual player metadata, transport and recovery after restarting the gateway. Test commands on the installed MA version; Sonos Pause remains disabled in the clients.
 
-Secrets stay in the gateway environment and private device NVS; never commit them. Docker administrators can inspect container environment. The initial device endpoint shares one token across provisioned devices: rotate the server token and reprovision all devices if it is disclosed. Origin checks do not replace LAN access controls. Browser artwork can fall back to placeholders if MA's image endpoint requires additional authentication.
+Secrets stay in the gateway environment and private device NVS; never commit them. Docker administrators can inspect container environment. The initial device endpoint shares one token across provisioned devices: rotate the server token and reprovision all devices if it is disclosed. LAN access controls are still required. Browser artwork can fall back to placeholders if MA's image endpoint requires additional authentication.
 
 ## Local development and tests
 
