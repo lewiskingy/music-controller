@@ -149,7 +149,7 @@ def test_bundled_runtime_self_test():
 
 def test_flash_tool_failure_is_actionable(package):
     path, profile = package
-    with patch("esptool.main", side_effect=SystemExit(2)), pytest.raises(core.SetupError, match="download mode"):
+    with patch("esptool.main", side_effect=SystemExit(2)), pytest.raises(core.SetupError, match="bootloader mode"):
         core.flash(profile, path, "COM4")
 
 
@@ -228,3 +228,21 @@ def test_wifi_sleep_nvs_value(package, setting, expected):
 def test_wifi_sleep_rejects_non_boolean(value):
     with pytest.raises(core.SetupError, match="Wi-Fi sleep"):
         core.validate_settings(dict(wifi_sleep=value))
+
+
+def test_usb_failure_reports_failing_stage(package):
+    path, profile = package
+    def fails(args):
+        if "read_flash" in args:
+            print("A fatal error occurred: Failed to connect to ESP32-S3: No serial data received.")
+            raise SystemExit(2)
+    with patch("esptool.main", side_effect=fails), pytest.raises(core.SetupError, match="read partition table failed on COM4.*Failed to connect"):
+        core.flash(profile, path, "COM4")
+
+
+def test_usb_stage_progress_is_exposed(package):
+    path, profile = package
+    calls, stages = [], []
+    with patch("esptool.main", side_effect=device_stub(path, calls)):
+        core.flash(profile, path, "COM4", log=stages.append)
+    assert stages == ["Read partition table…", "Write firmware…"]
