@@ -1,19 +1,5 @@
 name: ESP32 firmware
 on:
-  pull_request:
-    paths:
-      - 'firmware/esp32/**'
-      - 'tests/test_esp32*.py'
-      - 'tests/test_playback_policy.py'
-      - 'tests/native-ui/**'
-      - 'tests/native-display/**'
-      - 'contracts/**'
-      - '.github/workflows/firmware.yml'
-      - 'tests/native-ui/**'
-      - 'tests/test_playback_policy.py'
-      - 'tests/test_esp32_focus_controls.py'
-      - 'tests/test_esp32_providers_volume.py'
-      - 'tests/test_esp32_provider_save.py'
   push:
     branches: [main]
     paths:

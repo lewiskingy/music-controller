@@ -29,3 +29,5 @@ Maintainers review and release changes. Opening a PR does not authorize merging,
 ## Firmware packaging and release documentation
 
 Read the [release asset guide](docs/releases.md) and [binary/address table](firmware/esp32/README.md#release-binaries-and-flash-addresses) before changing packaging or flashing instructions. Keep Actions artifact filenames, release filenames and merged images distinct. Document application-only updates versus complete installation, including private NVS provisioning. Never distribute NVS credentials with public firmware. Agents must preserve these distinctions as well as follow [AGENTS.md](AGENTS.md).
+
+Pull requests report a single **PR checks** gate; relevant component checks must pass. See [branch protection](docs/branch-protection.md) for the main ruleset and intentionally skipped checks.

@@ -18,20 +18,23 @@ docker build -t music-controller-gateway:local gateway
 
 The firmware guide documents the real ESP-IDF v5.4.2 build. Python source-contract tests check intended firmware/UI structure; passing them does not replace a compiler build or on-device acceptance. Gateway tests exercise actual authentication/validation/relay via aiohttp test servers, without real music playback.
 
-## Which Actions run?
+## Pull request checks
 
-| Changed paths on a PR or push to main | Checks/builds |
+Every PR runs [pr-checks.yml](../.github/workflows/pr-checks.yml), selects components using [pr_checks.py](../scripts/pr_checks.py), then calls the existing reusable checks. The final **PR checks** job runs even after dependency failure and rejects cancelled, failed or unexpectedly skipped selected checks. Non-selected component jobs may be intentionally skipped. Main pushes and release preparation retain their existing entry points.
+
+| Changed paths | PR checks selected |
 | --- | --- |
-| gateway/** | Gateway tests, deployment configuration validation, Docker build and container health smoke test |
-| firmware/esp32/**, tests/test_esp32*.py, tests/test_playback_policy.py or tests/native-ui/** | Firmware contract tests and ESP-IDF firmware build/artifact |
-| prototype/** or tests/prototype/** | Browser contracts, JavaScript syntax and static file checks |
-| contracts/** | All three component checks because the integration contract is shared |
-| A component's workflow YAML | That workflow only |
-| General README/docs/hardware documentation | No component build |
+| firmware/**, native tests, ESP32/playback policy tests | Firmware contracts, native acceptance and ESP-IDF build |
+| gateway code/configuration | Gateway tests, Compose/Caddy validation, Docker build/smoke |
+| prototype/**, tests/prototype/** or root README | Prototype contracts/syntax |
+| installer/** | Installer tests, Windows build/self-test |
+| hardware/enclosure code/assets | CAD tests, board check and renders |
+| contracts/** | Firmware, gateway and prototype |
+| Release helper/tests | Release tests, firmware, installer, gateway and prototype |
+| Workflow/policy files or unclassified code | All component checks |
+| Other documentation | Policy/change selection and final gate; component builds skipped |
 
-Component `.md` files are also excluded from build triggers. Manual dispatch runs the chosen workflow regardless of paths. GitHub push path filters compare the push's changed files; PR filters compare the PR diff. A combined firmware+gateway change naturally runs both. Every main push also runs the complete draft-release pipeline, irrespective of component path filters; enclosure tags use their separate workflow.
-
-Workflow path filters can leave required checks pending when a workflow is skipped. Do not make each path-filtered workflow an unconditional required branch-protection check; if you need a universal merge gate later, add an always-running aggregate that accepts intentionally skipped components. Repository protection settings are not changed here.
+For the exact fail-safe selection rules see the script and its tests. For the main ruleset and activation sequence see [branch protection](branch-protection.md). Require only **PR checks**, not individual conditional jobs. Main pushes additionally prepare the rolling draft with complete component validation.
 
 ## Adding a component
 
