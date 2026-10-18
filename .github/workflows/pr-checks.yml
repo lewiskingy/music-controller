@@ -12,7 +12,6 @@ jobs:
     outputs:
       firmware: ${{ steps.select.outputs.firmware }}
       gateway: ${{ steps.select.outputs.gateway }}
-      prototype: ${{ steps.select.outputs.prototype }}
       installer: ${{ steps.select.outputs.installer }}
       enclosure: ${{ steps.select.outputs.enclosure }}
       release: ${{ steps.select.outputs.release }}
@@ -34,10 +33,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.gateway == 'true'
     uses: ./.github/workflows/gateway.yml
-  prototype:
-    needs: changes
-    if: needs.changes.outputs.prototype == 'true'
-    uses: ./.github/workflows/prototype.yml
   installer:
     needs: changes
     if: needs.changes.outputs.installer == 'true'
@@ -60,7 +55,7 @@ jobs:
   gate:
     name: PR checks
     if: always()
-    needs: [changes, firmware, gateway, prototype, installer, enclosure, release]
+    needs: [changes, firmware, gateway, installer, enclosure, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

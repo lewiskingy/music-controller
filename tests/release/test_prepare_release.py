@@ -37,7 +37,7 @@ def bundle(tmp_path):
         files.append(dict(role=role, asset=name, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
     manifest = dict(version=version, gateway=dict(source_tag=version), profiles=[dict(files=files)])
     (tmp_path / 'release-manifest.json').write_text(json.dumps(manifest))
-    for name in ['LICENSE', 'NOTICE', 'THIRD_PARTY.md', 'music-controller-setup.exe', 'music-controller-cli.exe', 'music-controller-full-flash.bin', f'music-controller-prototype-{version}.tar.gz', f'music-controller-gateway-{version}.tar.gz']:
+    for name in ['LICENSE', 'NOTICE', 'THIRD_PARTY.md', 'music-controller-setup.exe', 'music-controller-cli.exe', 'music-controller-full-flash.bin', f'music-controller-gateway-{version}.tar.gz']:
         (tmp_path / name).write_bytes(b'asset')
     return tmp_path
 

@@ -14,7 +14,6 @@ The controller runs on a supported ESP32 touchscreen. It controls your existing 
 | [Dedicated gateway](gateway/README.md) | Required service connecting the controller to Music Assistant, including authentication, artwork conversion, device settings and provider-logo overrides |
 | [Windows installer](installer/README.md) | Prebuilt firmware installation and initial Wi-Fi/gateway configuration; updates preserve settings |
 | [Case and dock designs](hardware/enclosure/README.md) | Printable STL/STEP designs, renders and assembly instructions; first-fit prototype, not yet physically validated |
-| [Browser prototype](docs/prototype.md) | Optional older 800 × 480 landscape interaction prototype; not a preview of every current firmware feature |
 
 ## What do I need?
 
@@ -55,7 +54,7 @@ The touch interface uses **one focused screen** at a time, with large controls a
 
 For implementation details: [architecture](docs/architecture.md), [protocol](contracts/music-assistant.md), [development](docs/development.md), [release preparation and downloads](docs/releases.md), and [firmware engineering history](docs/firmware-history.md).
 
-Keep `.env`, controller keys and private NVS binaries private. Deploy on a trusted LAN; the example browser/settings frontend is not a public authenticated service.
+Keep `.env`, controller keys and private NVS binaries private. Deploy on a trusted LAN; the settings frontend must be restricted to trusted network users.
 
 ## Contributing
 

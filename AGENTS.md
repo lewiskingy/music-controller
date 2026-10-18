@@ -3,7 +3,7 @@
 ## Scope and architecture
 
 This repository owns the ESP32 touchscreen firmware, its companion Music
-Assistant gateway, the browser prototype, shared contracts and enclosure design.
+Assistant gateway, shared contracts and enclosure design.
 Read the relevant README and contracts before changing a component. More specific
 AGENTS.md files apply within their directories.
 

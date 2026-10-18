@@ -34,9 +34,7 @@ Edit `.env`, replacing placeholders:
 | `MA_WS_URL` | `http://192.168.1.20:8095/ws` — Music Assistant reachable from the container |
 | `MA_USERNAME`, `MA_PASSWORD` | Dedicated Music Assistant account from step 1 |
 | `CONTROLLER_DEVICE_TOKEN` | The random value generated above; save it securely for the installer |
-| `CONTROLLER_ORIGIN` | `https://controller.example.net` — your exact browser origin |
 | `CONTROLLER_HOST` | `controller.example.net` — used by the optional Caddy frontend |
-| `MA_HTTP_UPSTREAM` | `192.168.1.20:8095` — optional prototype artwork upstream |
 | `CONTROLLER_BIND_IP` | Your server's LAN IP for the optional frontend; default `127.0.0.1` cannot serve a physical controller |
 
 Replace example names and addresses with yours. `host.docker.internal` in the template means the Docker host; it is not a discovery name for Music Assistant on another machine.
@@ -78,7 +76,7 @@ controller.example.net {
 }
 ```
 
-Configure LAN DNS so `controller.example.net` resolves to the proxy's LAN IP. Permit access from the device's Wi-Fi to TCP 443, and restrict ingress to your trusted network. A proxy in another container must share a Docker network and use `gateway:8080` instead of its own loopback. The [bundled Caddyfile](../gateway/Caddyfile) additionally serves the optional browser prototype.
+Configure LAN DNS so `controller.example.net` resolves to the proxy's LAN IP. Permit access from the device's Wi-Fi to TCP 443, and restrict ingress to your trusted network. A proxy in another container must share a Docker network and use `gateway:8080` instead of its own loopback. The [bundled Caddyfile](../gateway/Caddyfile) proxies device and settings routes; it no longer serves a browser client.
 
 ### New frontend without an existing certificate
 

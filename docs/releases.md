@@ -4,7 +4,7 @@
 
 Every push to `main` runs **Prepare draft release**. Firmware contracts/native
 UI acceptance/ESP-IDF build, Windows installer tests/build/self-test, gateway
-tests/container checks and browser checks must all pass before remote release
+tests/container checks must all pass before remote release
 changes begin.
 
 There is one **rolling draft** for main. Each successful merge refreshes its
@@ -43,12 +43,10 @@ The downloaded draft installer still discovers **published stable releases**, no
 | `waveshare-4.3-*.bin` | Individual bootloader, partition, OTA-data and application binaries; use manifest offsets, not `0x0` for the application |
 | `music-controller-full-flash.bin` | Merged firmware for manual full installation/recovery at `0x0`; restore private NVS at `0x9000` afterward |
 | `music-controller-gateway-vX.Y.Z.tar.gz` | Gateway source; build on your network host, retain private `.env` and data volume |
-| `music-controller-prototype-vX.Y.Z.tar.gz` | Optional browser prototype, not the firmware or gateway |
 | `LICENSE`, `NOTICE`, `THIRD_PARTY.md` | Project licence, attribution and dependency licensing boundaries; also included in source archives |
 | `SHA256SUMS` | SHA-256 hashes of all attached payloads and the manifest |
 
-New prototype archives have an explicit `prototype` filename. Older releases such as v0.5.0 use `music-controller-v0.5.0.tar.gz` for that browser-only archive.
-
+Historical releases may contain browser prototype archives; new releases no longer produce them.
 Use **Releases → version → Assets** for durable released downloads. Actions artifacts are useful for testing PRs/commits and can expire. For Atlas, update its gateway source pin to the chosen published `vX.Y.Z`, then deploy normally; no archive download is required.
 
 ## Manual preparation, retries and safeguards
