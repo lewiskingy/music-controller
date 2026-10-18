@@ -172,12 +172,18 @@ def ports():
     return [(p.device, p.description) for p in comports()]
 
 
-def flash(profile, destination, port, full=False, log=None):
+def flash(profile, destination, port, full=False, log=None, manual_bootloader=False):
     import esptool
     validate_profile(profile)
     destination = Path(destination)
     files = profile["files"] if full else [f for f in profile["files"] if f["role"] in ("otadata", "application")]
-    args = ["--chip", profile["chip"], "--port", port, "--baud", "460800"]
+    args = ["--chip", profile["chip"], "--port", port, "--baud",
+            "115200" if manual_bootloader else "460800"]
+    if manual_bootloader:
+        # Caller must put board in download mode. Preserve this across separate
+        # esptool read/write invocations; RTS reset can leave battery-powered
+        # boards in the wrong state between stages.
+        args += ["--before", "no-reset", "--after", "no-reset"]
     def run(arguments, stage):
         # PyInstaller --windowed otherwise swallows esptool diagnostics because
         # it has no console. Capture only the USB stage: never provisioning data.
@@ -198,6 +204,8 @@ def flash(profile, destination, port, full=False, log=None):
                                    "invalid head", "unexpected packet", "wrong boot",
                                    "could not", "error:", "no serial"))), "")
             detail = "".join(c if 32 <= ord(c) <= 126 else " " for c in detail)[:240]
+            if not detail and isinstance(error, OSError):
+                detail = f"{type(error).__name__} (OS error {getattr(error, 'winerror', None) or getattr(error, 'errno', 'unknown')})"
             raise SetupError(
                 f"USB {stage.lower()} failed on {port}."
                 + (f" Esptool: {detail}" if detail else f" ({type(error).__name__})")
