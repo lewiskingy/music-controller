@@ -87,8 +87,8 @@ class Installer:
             self.root.after(1200, lambda: self.update_available(info))
             return
         if messagebox.askyesno("Setup update available",
-                f"Music Controller Setup {info['version']} is available.\\n"
-                f"Current installer: {update.VERSION}.\\n\\nUpdate now?"):
+                f"Music Controller Setup {info['version']} is available.\n"
+                f"Current installer: {update.VERSION}.\n\nUpdate now?"):
             self.task(lambda: update.stage(info), self.launch_update)
 
     def launch_update(self, path):
