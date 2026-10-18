@@ -29,7 +29,7 @@ def build(build_dir, destination, version):
         data = target.read_bytes()
         files.append(dict(role=role, asset=name, offset=offset, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
     profile = dict(id="waveshare-esp32s3-touch-lcd-4.3", name="Waveshare ESP32-S3 Touch LCD 4.3 (800×480)", chip="esp32s3", resolution=[800, 480], provisioning_schema="controller-v1", nvs=dict(offset=0x9000, size=0x6000), files=files)
-    manifest = dict(schema_version=1, version=version, gateway=dict(source_tag=version), profiles=[profile])
+    manifest = dict(schema_version=1, version=version, installer=dict(minimum_version="0.5.0"), gateway=dict(source_tag=version), profiles=[profile])
     (destination / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
