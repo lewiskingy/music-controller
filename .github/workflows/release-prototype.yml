@@ -85,8 +85,9 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          tar -czf "dist/release/music-controller-prototype-${VERSION}.tar.gz" -C prototype .
-          tar -czf "dist/release/music-controller-gateway-${VERSION}.tar.gz" gateway
+          cp LICENSE NOTICE THIRD_PARTY.md dist/release/
+          tar -czf "dist/release/music-controller-prototype-${VERSION}.tar.gz" LICENSE NOTICE THIRD_PARTY.md -C prototype .
+          tar -czf "dist/release/music-controller-gateway-${VERSION}.tar.gz" LICENSE NOTICE THIRD_PARTY.md gateway
       - name: Verify assets and prepare draft (never publish)
         env:
           GH_TOKEN: ${{ github.token }}

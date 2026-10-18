@@ -108,6 +108,7 @@ jobs:
           cp build/music_controller.bin build/music_controller.elf build/music_controller.map ../../dist/esp32/
           cp sdkconfig ../../dist/esp32/
           cp build/flash_args ../../dist/esp32/
+          cp ../../LICENSE ../../NOTICE ../../THIRD_PARTY.md ../../dist/esp32/
           # Compiler stack reports complement the on-device low-water diagnostics.
           find build/esp-idf/main -name '*.su' -exec cp {} ../../dist/esp32/ \;
           cp build/ota_data_initial.bin ../../dist/esp32/

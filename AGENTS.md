@@ -58,3 +58,11 @@ Report what changed, the checks actually run, and outstanding physical acceptanc
 Never describe simulated checks as proof of hardware behavior or claim CI passed
 without checking the relevant commit. Do not merge, tag or deploy merely because
 implementation is complete; follow the user's requested scope.
+
+## Licensing and distribution
+
+Original project material uses Apache-2.0; see LICENSE, NOTICE and THIRD_PARTY.md.
+Preserve upstream notices and distinguish original code from bundled dependencies,
+provider trademarks and manufacturer models. Include project licensing files when
+adding release packages. Do not claim frozen installers or containers contain only
+Apache-licensed material; esptool and other dependencies retain their own terms.

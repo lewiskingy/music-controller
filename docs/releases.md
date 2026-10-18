@@ -44,6 +44,7 @@ The downloaded draft installer still discovers **published stable releases**, no
 | `music-controller-full-flash.bin` | Merged firmware for manual full installation/recovery at `0x0`; restore private NVS at `0x9000` afterward |
 | `music-controller-gateway-vX.Y.Z.tar.gz` | Gateway source; build on your network host, retain private `.env` and data volume |
 | `music-controller-prototype-vX.Y.Z.tar.gz` | Optional browser prototype, not the firmware or gateway |
+| `LICENSE`, `NOTICE`, `THIRD_PARTY.md` | Project licence, attribution and dependency licensing boundaries; also included in source archives |
 | `SHA256SUMS` | SHA-256 hashes of all attached payloads and the manifest |
 
 New prototype archives have an explicit `prototype` filename. Older releases such as v0.5.0 use `music-controller-v0.5.0.tar.gz` for that browser-only archive.

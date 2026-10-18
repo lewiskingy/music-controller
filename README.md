@@ -62,3 +62,7 @@ Keep `.env`, controller keys and private NVS binaries private. Deploy on a trust
 Bug reports, improvements and hardware testing are welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** before starting.
 
 **Using an AI coding agent? It must read [AGENTS.md — required repository instructions](AGENTS.md) before making changes, plus any AGENTS.md instructions in the directories it modifies.**
+
+## License
+
+Music Controller's original code, documentation, artwork and enclosure designs are open source under the **[Apache License 2.0](LICENSE)**, except where otherwise noted. You may use, modify and redistribute them, including commercially, subject to the licence. Publishing modifications is not required. See [NOTICE](NOTICE) and [third-party materials](THIRD_PARTY.md) for attribution and separately licensed components.
