@@ -24,7 +24,6 @@ Every PR runs [pr-checks.yml](../.github/workflows/pr-checks.yml), selects compo
 | --- | --- |
 | firmware/**, native tests, ESP32/playback policy tests | Firmware contracts, native acceptance and ESP-IDF build |
 | gateway code/configuration | Gateway tests, Compose/Caddy validation, Docker build/smoke |
-| root README | No standalone runtime job |
 | installer/** | Installer tests, Windows build/self-test |
 | hardware/enclosure code/assets | CAD tests, board check and renders |
 | contracts/** | Firmware and gateway |
