@@ -3,13 +3,15 @@ import argparse
 import getpass
 from pathlib import Path
 import tempfile
-from . import core
+from . import core, update
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", nargs="?", choices=["releases", "install", "provision"])
     parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--apply-update", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--old-pid", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--rel")
     parser.add_argument("--profile")
     parser.add_argument("--port")
@@ -17,6 +19,12 @@ def main(argv=None):
     parser.add_argument("--keep-files", type=Path, metavar="DIRECTORY")
     parser.add_argument("--export-gateway", type=Path, metavar="FILE")
     args = parser.parse_args(argv)
+    if args.apply_update:
+        return update.apply_update(args.apply_update, args.old_pid)
+    if args.mode is None and not update.single_instance():
+        from tkinter import messagebox
+        messagebox.showinfo("Music Controller Setup", "Music Controller Setup is already running.")
+        return
     if args.self_test:
         core.self_test()
         return
@@ -32,7 +40,10 @@ def main(argv=None):
         if args.prepare_only and not args.keep_files:
             parser.error("--prepare-only requires --keep-files DIRECTORY")
         selected = core.release(args.rel)
-        profile = core.profile_for(core.manifest(selected), args.profile)
+        data = core.manifest(selected)
+        if update.VERSION != "0.0.0" and not update.compatible(data):
+            raise core.SetupError("Installer update required: version " + update.minimum_version(data))
+        profile = core.profile_for(data, args.profile)
         settings = None
         if args.mode == "provision":
             settings = {
