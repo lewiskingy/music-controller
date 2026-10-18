@@ -197,7 +197,7 @@ def flash(profile, destination, port, full=False, log=None):
                                   ("fatal error", "failed to", "timed out", "serial", "port",
                                    "invalid head", "unexpected packet", "wrong boot",
                                    "could not", "error:", "no serial"))), "")
-            detail = re.sub(r"[^\\x20-\\x7e]", " ", detail)[:240]
+            detail = "".join(c if 32 <= ord(c) <= 126 else " " for c in detail)[:240]
             raise SetupError(
                 f"USB {stage.lower()} failed on {port}."
                 + (f" Esptool: {detail}" if detail else f" ({type(error).__name__})")
