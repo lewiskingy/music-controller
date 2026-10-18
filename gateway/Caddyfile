@@ -13,19 +13,6 @@
         uri strip_prefix /controller
         reverse_proxy gateway:8080
     }
-    handle /controller/ma/ws {
-        rewrite * /ws
-        reverse_proxy gateway:8080
-    }
-    handle /controller/ma/image {
-        rewrite * /image
-        reverse_proxy {$MA_HTTP_UPSTREAM}
-    }
-    redir /controller /controller/
-    handle_path /controller/* {
-        root * /srv/controller
-        file_server
-    }
     handle {
         respond "Not found" 404
     }

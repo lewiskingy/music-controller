@@ -10,12 +10,12 @@ spec.loader.exec_module(policy)
 class PolicyTests(unittest.TestCase):
     def test_documentation_does_not_need_runtime_builds(self):
         self.assertFalse(any(policy.classify(['docs/hardware.md', 'CONTRIBUTING.md']).values()))
-        self.assertTrue(policy.classify(['README.md'])['prototype'])
+        self.assertFalse(any(policy.classify(['README.md']).values()))
 
     def test_component_and_shared_selection(self):
-        for prefix, component in [('firmware/esp32/main/main.c','firmware'), ('gateway/app.py','gateway'), ('installer/setup.py','installer'), ('prototype/app.js','prototype'), ('hardware/enclosure/build.py','enclosure')]:
+        for prefix, component in [('firmware/esp32/main/main.c','firmware'), ('gateway/app.py','gateway'), ('installer/setup.py','installer'), ('hardware/enclosure/build.py','enclosure')]:
             self.assertEqual({k for k,v in policy.classify([prefix]).items() if v}, {component})
-        self.assertEqual({k for k,v in policy.classify(['contracts/music-assistant.md']).items() if v}, {'firmware','gateway','prototype'})
+        self.assertEqual({k for k,v in policy.classify(['contracts/music-assistant.md']).items() if v}, {'firmware','gateway'})
 
     def test_ci_and_unknown_paths_fail_safe(self):
         for path in ['.github/workflows/pr-checks.yml', 'scripts/pr_checks.py', 'new-component/app.py', 'LICENSE']:

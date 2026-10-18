@@ -33,7 +33,6 @@ services:
       - host.docker.internal:host-gateway
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../prototype:/srv/controller:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-COMPONENTS = ('firmware', 'gateway', 'prototype', 'installer', 'enclosure', 'release')
+COMPONENTS = ('firmware', 'gateway', 'installer', 'enclosure', 'release')
 
 
 def classify(paths):
@@ -14,23 +14,19 @@ def classify(paths):
         if name.startswith('.github/workflows/') or name in ('LICENSE', 'NOTICE', 'THIRD_PARTY.md') or name.startswith(('scripts/pr_checks', 'tests/ci/')):
             selected.update(COMPONENTS)
         elif name.startswith('contracts/'):
-            selected.update(('firmware', 'gateway', 'prototype'))
-        elif name == 'README.md':
-            selected.add('prototype')  # Prototype contracts inspect the root README.
+            selected.update(('firmware', 'gateway'))
         elif name.startswith(('firmware/', 'tests/native-', 'tests/test_esp32', 'tests/test_playback_policy')):
             selected.add('firmware')
         elif name.startswith('gateway/'):
             if not name.endswith('.md'):
                 selected.add('gateway')
-        elif name.startswith(('prototype/', 'tests/prototype/')):
-            selected.add('prototype')
         elif name.startswith(('installer/', 'tests/installer/')):
             selected.add('installer')
         elif name.startswith('hardware/enclosure/'):
             if not name.endswith('.md'):
                 selected.add('enclosure')
         elif name.startswith(('scripts/prepare_release', 'tests/release/')):
-            selected.update(('release', 'installer', 'firmware', 'gateway', 'prototype'))
+            selected.update(('release', 'installer', 'firmware', 'gateway'))
         elif name.endswith('.md') or name.startswith('docs/'):
             continue
         else:

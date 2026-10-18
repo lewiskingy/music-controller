@@ -1,6 +1,6 @@
 # Music Controller gateway
 
-The companion backend for ESP32 firmware and the browser prototype. It uses Python 3.12/aiohttp to authenticate to your Music Assistant server and relay a limited set of requests and live events. It does not serve audio or own a music library.
+The companion backend for ESP32 firmware. It uses Python 3.12/aiohttp to authenticate to your Music Assistant server and relay a limited set of requests and live events. It does not serve audio or own a music library.
 
 For the complete installation sequence, follow [Getting Started](../docs/getting-started.md). This repository owns the gateway; Atlas is one independent deployment consumer, not a prerequisite. Current firmware uses the gateway for playback, Queue, Browse, Search, artwork, provider icons and settings.
 
@@ -31,9 +31,7 @@ Edit `.env`, replace the password/token placeholders and choose your Music Assis
 | MA_WS_URL | Complete upstream WebSocket URL, e.g. `http://host.docker.internal:8095/ws`; `ws://`/`wss://` also supported by aiohttp |
 | MA_USERNAME / MA_PASSWORD | Dedicated Music Assistant account; required at startup |
 | CONTROLLER_DEVICE_TOKEN | Random shared device credential; empty disables the device endpoint when running Python directly |
-| CONTROLLER_ORIGIN | Exact browser origin, e.g. `https://controller.example.net`, no trailing slash; empty disables browser access |
 | CONTROLLER_HOST | Hostname for the optional Caddy frontend; must match the origin and resolve to your host |
-| MA_HTTP_UPSTREAM | Host:port for the optional browser image route; usually the same Music Assistant host as MA_WS_URL |
 | CONTROLLER_BIND_IP | Host interface for the optional HTTPS frontend; default loopback, set to your server's LAN address for devices |
 
 `host.docker.internal` is mapped to the Docker host by the example Compose file. For Music Assistant on another machine use that machine's DNS name/address instead. If your firewall blocks Docker-to-host connections, permit only the gateway's network/address to the MA port; a healthy container alone does not prove upstream connectivity.
@@ -47,7 +45,7 @@ docker compose logs --tail 50 gateway
 
 The raw gateway port is bound to loopback for use by an existing host reverse proxy. It is not a TLS server. `/health` checks only whether MA account settings are present; it does not log in or prove Music Assistant is reachable. Login happens when a client connects.
 
-## HTTPS frontend and browser hosting
+## HTTPS frontend for device connections
 
 See [DNS and trusted HTTPS setup](../docs/getting-started.md#3-configure-dns-and-trusted-https) for a host-proxy example using existing trusted certificate files, and DNS-challenge requirements for a new certificate. A physical device needs this before installation can succeed.
 
@@ -58,22 +56,7 @@ docker compose --profile web config --quiet
 docker compose --profile web up -d --build
 ```
 
-Set a real `CONTROLLER_HOST`, matching `CONTROLLER_ORIGIN`, and `CONTROLLER_BIND_IP` first. The example frontend mounts this checkout's `prototype/` and maps:
-
-| Public path | Destination |
-| --- | --- |
-| /controller/ | Static browser files |
-| /controller/ma/ws | Gateway `/ws` |
-| /controller/device/ws | Gateway `/device/ws` |
-| /controller/device/artwork/{art_id} | Gateway `/device/artwork/{art_id}` with device-token authentication |
-| /controller/ma/image | Music Assistant `/image` (browser artwork) |
-| /controller/settings* | Gateway `/settings*` (device settings and provider-logo uploads) |
-
-The example uses standard Caddy automatic HTTPS, which needs valid DNS and successful certificate issuance. A LAN-only server may require you to configure DNS challenges using an appropriate Caddy build, or supply an existing publicly trusted certificate through your reverse proxy. Do not open the controller to the internet to make this work. Caddy's local CA is not trusted by the firmware's default ESP-IDF CA bundle. Prefer an existing trusted TLS frontend if you already have one. Ports 80/443 must be free on the chosen bind address; existing Caddy users can reuse the routes rather than start another frontend.
-
-For an existing proxy on the host, proxy to `127.0.0.1:8080`; another container must share the gateway's network and use `gateway:8080`. Preserve `Origin` and `X-Device-Token`, support WebSocket upgrades, and apply LAN restrictions at the ingress/firewall. [Caddyfile](Caddyfile) illustrates rewrites; adapt its upstream address for your deployment.
-
-Open `https://YOUR_HOST/controller/` for the browser. Provision the ESP32 with `wss://YOUR_HOST/controller/device/ws`. The device uses this URL from NVS, not a compiled-in server address. See [device setup](ESP32_DEVICE.md).
+Set `CONTROLLER_HOST` and `CONTROLLER_BIND_IP` before starting the optional Caddy frontend. The reverse proxy retains `/controller/device/ws`, `/controller/device/artwork/*` and `/controller/settings*` routes. There is no HTML client or static-file hosting. Provision the ESP32 with `wss://YOUR_HOST/controller/device/ws`. See [device setup](ESP32_DEVICE.md).
 
 ## Verify operation
 

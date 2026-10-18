@@ -10,8 +10,6 @@ From the repository root:
 python -m pip install -r gateway/requirements.txt pytest==8.4.2
 python -m pytest gateway/tests -q
 python -m pytest tests -q
-node --input-type=module --check < prototype/app.js
-node --input-type=module --check < prototype/music-assistant.js
 docker compose --env-file gateway/.env.example -f gateway/compose.yml --profile web config --quiet
 docker build -t music-controller-gateway:local gateway
 ```
@@ -26,11 +24,11 @@ Every PR runs [pr-checks.yml](../.github/workflows/pr-checks.yml), selects compo
 | --- | --- |
 | firmware/**, native tests, ESP32/playback policy tests | Firmware contracts, native acceptance and ESP-IDF build |
 | gateway code/configuration | Gateway tests, Compose/Caddy validation, Docker build/smoke |
-| prototype/**, tests/prototype/** or root README | Prototype contracts/syntax |
+| root README | No standalone runtime job |
 | installer/** | Installer tests, Windows build/self-test |
 | hardware/enclosure code/assets | CAD tests, board check and renders |
-| contracts/** | Firmware, gateway and prototype |
-| Release helper/tests | Release tests, firmware, installer, gateway and prototype |
+| contracts/** | Firmware and gateway |
+| Release helper/tests | Release tests, firmware, installer and gateway |
 | Workflow/policy files or unclassified code | All component checks |
 | Other documentation | Policy/change selection and final gate; component builds skipped |
 
@@ -42,7 +40,7 @@ Give new tests a component-specific directory and include it in that workflow's 
 
 ## Releases and deployment
 
-Every main push runs `.github/workflows/release-prototype.yml` (**Prepare draft release**) using reusable firmware, installer, gateway and prototype workflows. After validation it attaches all assets to a tagged **draft**, never automatically publishes. Main merges default to the next patch version; manual main-branch dispatch supports a major/minor override. Manual stable tag pushes also prepare drafts. See [release operations and asset guide](releases.md) for review, promotion, retries and installer limitations.
+Every main push runs `.github/workflows/release-prototype.yml` (**Prepare draft release**) using reusable firmware, installer, gateway workflows. After validation it attaches all assets to a tagged **draft**, never automatically publishes. Main merges default to the next patch version; manual main-branch dispatch supports a major/minor override. Manual stable tag pushes also prepare drafts. See [release operations and asset guide](releases.md) for review, promotion, retries and installer limitations.
 
 Firmware CI also uploads Actions artifacts. The draft includes the merged full-flash image as well as installer-compatible per-profile binaries. Gateway containers are built/tested but not registry-published. Consumers build from exact source tags, preserving environment/volumes. Atlas pin changes and deployment remain separate operations.
 

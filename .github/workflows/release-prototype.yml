@@ -58,11 +58,8 @@ jobs:
   gateway:
     needs: version
     uses: ./.github/workflows/gateway.yml
-  prototype:
-    needs: version
-    uses: ./.github/workflows/prototype.yml
   draft:
-    needs: [version, installer, firmware, gateway, prototype]
+    needs: [version, installer, firmware, gateway]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,12 +75,11 @@ jobs:
         with:
           name: music-controller-windows
           path: dist/release
-      - name: Package prototype and gateway from the tested commit
+      - name: Package gateway from the tested commit
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           cp LICENSE NOTICE THIRD_PARTY.md dist/release/
-          tar -czf "dist/release/music-controller-prototype-${VERSION}.tar.gz" LICENSE NOTICE THIRD_PARTY.md -C prototype .
           tar -czf "dist/release/music-controller-gateway-${VERSION}.tar.gz" LICENSE NOTICE THIRD_PARTY.md gateway
       - name: Verify assets and prepare draft (never publish)
         env:

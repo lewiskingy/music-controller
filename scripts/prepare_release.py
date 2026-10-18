@@ -84,7 +84,6 @@ def verify_bundle(directory, version):
         "LICENSE", "NOTICE", "THIRD_PARTY.md",
         "music-controller-setup.exe", "music-controller-cli.exe",
         "music-controller-full-flash.bin", "release-manifest.json",
-        f"music-controller-prototype-{version}.tar.gz",
         f"music-controller-gateway-{version}.tar.gz",
     }
     for profile in manifest["profiles"]:
