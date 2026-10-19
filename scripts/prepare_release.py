@@ -9,6 +9,17 @@ import subprocess
 
 VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 
+STABLE = re.compile(r"v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\Z")
+VERSION = re.compile(r"v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-rc\\.([1-9]\\d*))?\\Z")
+
+
+def release_key(value):
+    match = VERSION.fullmatch(value)
+    if not match:
+        raise ValueError(f"Expected vMAJOR.MINOR.PATCH[-rc.N], got {value!r}")
+    major, minor, patch, rc = match.groups()
+    return (int(major), int(minor), int(patch), 0 if rc else 1, int(rc or 0))
+
 
 def version_key(value):
     match = STABLE.fullmatch(value)
