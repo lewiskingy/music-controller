@@ -21,7 +21,7 @@ def test_retry_reuses_commit_tag_and_manual_minor_override():
     assert release.choose_version(['v0.5.0'], [], 'v0.6.0') == 'v0.6.0'
     with pytest.raises(ValueError):
         release.choose_version(['v0.5.0'], [], 'v0.5.0')
-    for invalid in ['latest', 'v1.2', 'v1.2.3-rc.1', 'v01.2.3', 'v1.2.3\n']:
+    for invalid in ['latest', 'v1.2', 'v01.2.3', 'v1.2.3\n']:
         with pytest.raises(ValueError):
             release.choose_version([], [], invalid)
 
@@ -90,7 +90,7 @@ def test_prepare_never_publishes_or_changes_an_existing_published_release(bundle
             return 'source-sha'
         if args == ('git', 'tag', '--list'):
             return '' if state == 'new' else 'v0.5.1'
-        if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
+        if args == ('git', 'rev-parse', 'v0.5.1-rc.2^{commit}'):
             return 'other-sha' if state == 'collision' else 'source-sha'
         if args[:4] == ('gh', 'api', '--paginate', '--slurp'):
             return json.dumps([[] if state == 'new' else [dict(tag_name='v0.5.1', draft=state in ['draft', 'collision'], html_url='https://example/release')]])
@@ -113,16 +113,21 @@ def test_prepare_never_publishes_or_changes_an_existing_published_release(bundle
         assert '--draft' in writes[1] and '--latest=false' in writes[1] and '--verify-tag' in writes[1]
 
 
-def test_rolling_reuses_highest_draft_then_allocates_after_publication():
-    tags = ['v0.5.0', 'v0.5.1', 'v0.5.2']
-    records = [dict(tag_name=t, draft=t != 'v0.5.0') for t in tags]
-    assert release.rolling_version(tags, [], records) == 'v0.5.2'
-    assert release.rolling_version(tags, [], records, 'v0.5.2') == 'v0.5.2'
-    records[-1]['draft'] = False
-    assert release.rolling_version(tags, ['v0.5.2'], records) == 'v0.5.3'
-    with pytest.raises(ValueError, match='newer than published'):
-        release.rolling_version(tags, [], records, 'v0.5.1')
-    assert release.rolling_version(tags, [], records, 'v0.6.0') == 'v0.6.0'
+def test_rolling_reuses_draft_and_advances_immutable_rc():
+    records = [dict(tag_name="v0.5.13", draft=False),
+               dict(tag_name="v0.5.14-rc.1", draft=True)]
+    assert release.rolling_version([], [], records) == "v0.5.14-rc.1"
+    records[-1]["draft"] = False
+    assert release.rolling_version([], [], records) == "v0.5.14-rc.2"
+    with pytest.raises(ValueError, match="cannot be overwritten"):
+        release.rolling_version([], [], records, "v0.5.14-rc.1")
+    with pytest.raises(ValueError, match="must use"):
+        release.rolling_version([], [], records, "v0.5.14")
+
+
+def test_semver_candidate_order():
+    assert release.release_key("v0.5.14-rc.1") < release.release_key("v0.5.14-rc.2")
+    assert release.release_key("v0.5.14-rc.2") < release.release_key("v0.5.14")
 
 
 @pytest.mark.parametrize('published,rollback,upload_fails', [(False, False, False), (True, False, False), (False, True, False), (False, False, True)])
@@ -130,18 +135,24 @@ def test_rolling_refresh_and_cleanup_only_after_success(bundle, monkeypatch, pub
     monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
     monkeypatch.delenv('GITHUB_STEP_SUMMARY', raising=False)
     records = [
-        dict(id=10, tag_name='v0.5.0', draft=True),
-        dict(id=11, tag_name='v0.5.1', draft=not published, html_url='url'),
+        dict(id=10, tag_name='v0.5.1-rc.1', draft=True),
+        dict(id=11, tag_name='v0.5.1-rc.2', draft=not published, html_url='url'),
         dict(id=12, tag_name='gateway-v1.0.0', draft=True),
         dict(id=13, tag_name='v0.4.0', draft=False),
     ]
     calls = []
+    manifest_path = bundle / "release-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["version"] = "v0.5.1-rc.2"
+    manifest["gateway"]["source_tag"] = "v0.5.1-rc.2"
+    manifest_path.write_text(json.dumps(manifest))
+    (bundle / "music-controller-gateway-v0.5.1.tar.gz").rename(bundle / "music-controller-gateway-v0.5.1-rc.2.tar.gz")
     def fake_run(*args):
         calls.append(args)
         if args == ('git', 'rev-parse', 'HEAD'):
             return 'new-sha'
         if args == ('git', 'tag', '--list'):
-            return 'v0.5.0\nv0.5.1'
+            return 'v0.5.1-rc.1\nv0.5.1-rc.2'
         if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
             return 'old-sha'
         if args[:2] == ('git', 'merge-base'):
@@ -156,7 +167,7 @@ def test_rolling_refresh_and_cleanup_only_after_success(bundle, monkeypatch, pub
     monkeypatch.setattr(release, 'run', fake_run)
     if published or rollback:
         with pytest.raises(ValueError):
-            release.prepare(bundle, 'v0.5.1', rolling=True)
+            release.prepare(bundle, 'v0.5.1-rc.2', rolling=True)
         assert not any('--method' in c or c[:2] == ('gh', 'release') for c in calls)
         return
     if upload_fails:
