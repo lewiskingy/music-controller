@@ -11,7 +11,7 @@ VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 
 
 def version_key(value):
-    match = VERSION.fullmatch(value)
+    match = STABLE.fullmatch(value)
     if not match:
         raise ValueError(f"Expected vMAJOR.MINOR.PATCH, got {value!r}")
     return tuple(map(int, match.groups()[:3]))
@@ -20,14 +20,14 @@ def version_key(value):
 def choose_version(tags, commit_tags, requested=""):
     """Reuse this commit's version on retry; otherwise allocate above all tags."""
     if requested:
-        version_key(requested)
+        release_key(requested)
         if requested in tags and requested not in commit_tags:
             raise ValueError("Requested version already belongs to another commit")
         return requested
-    existing = [tag for tag in commit_tags if VERSION.fullmatch(tag)]
+    existing = [tag for tag in commit_tags if STABLE.fullmatch(tag)]
     if existing:
         return max(existing, key=version_key)
-    versions = [version_key(tag) for tag in tags if VERSION.fullmatch(tag)]
+    versions = [version_key(tag) for tag in tags if STABLE.fullmatch(tag)]
     major, minor, patch = max(versions, default=(0, 0, 0))
     return f"v{major}.{minor}.{patch + 1}"
 
