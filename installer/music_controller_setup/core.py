@@ -172,18 +172,19 @@ def ports():
     return [(p.device, p.description) for p in comports()]
 
 
-def flash(profile, destination, port, full=False, log=None, manual_bootloader=False):
+def flash(profile, destination, port, full=False, log=None, manual_bootloader=False, baud=460800):
     import esptool
     validate_profile(profile)
     destination = Path(destination)
     files = profile["files"] if full else [f for f in profile["files"] if f["role"] in ("otadata", "application")]
-    args = ["--chip", profile["chip"], "--port", port, "--baud",
-            "115200" if manual_bootloader else "460800"]
+    if type(baud) is not int or baud not in (115200, 460800):
+        raise SetupError("Unsupported flashing baud rate; choose 115200 or 460800")
+    args = ["--chip", profile["chip"], "--port", port, "--baud", str(baud)]
     if manual_bootloader:
         # Caller must put board in download mode. Preserve this across separate
         # esptool read/write invocations; RTS reset can leave battery-powered
         # boards in the wrong state between stages.
-        args += ["--before", "no-reset", "--after", "no-reset"]
+        args += ["--before", "no_reset", "--after", "no_reset"]
     def run(arguments, stage):
         # PyInstaller --windowed otherwise swallows esptool diagnostics because
         # it has no console. Capture only the USB stage: never provisioning data.

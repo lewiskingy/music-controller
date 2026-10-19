@@ -23,8 +23,8 @@ class Installer:
         self.data = None
         self.available = []
         root.title(f"Music Controller Setup {update.VERSION}")
-        root.geometry("720x810")
-        root.minsize(680, 810)
+        root.geometry("720x850")
+        root.minsize(680, 850)
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
@@ -44,6 +44,14 @@ class Installer:
                                  variable=self.manual_bootloader)
         manual.pack(anchor="w")
         self.controls.append(manual)
+        speed_row = ttk.Frame(frame)
+        speed_row.pack(fill="x", pady=(2, 2))
+        ttk.Label(speed_row, text="Flashing speed").pack(side="left", padx=(0, 12))
+        self.flash_baud = tk.StringVar(value="460800")
+        speed = ttk.Combobox(speed_row, textvariable=self.flash_baud,
+                             values=["460800", "115200"], state="readonly", width=12)
+        speed.pack(side="left")
+        self.controls.append(speed)
         self.settings = {}
         form = ttk.Frame(frame)
         form.pack(fill="x", pady=8)
@@ -286,6 +294,7 @@ class Installer:
         full = self.mode.get() == "Set up new device"
         settings = {key: value.get() for key, value in self.settings.items()} if full else None
         manual_bootloader = self.manual_bootloader.get()
+        selected_baud = int(self.flash_baud.get())
         try:
             core.validate_profile(profile)
             if full:
@@ -315,33 +324,18 @@ class Installer:
                 return messagebox.showerror("USB port", "Connect your device and refresh USB ports.")
             port = self.devices[self.port.current()][0]
             action = "ERASE ALL DATA and provision" if full else "Update firmware and preserve settings"
-            if not messagebox.askokcancel("Confirm installation", f"{selected['tag_name']}\n{profile['name']}\n{port}\n\n{action}? Keep USB connected until complete."):
+            if not messagebox.askokcancel("Confirm installation", f"{selected['tag_name']}\n{profile['name']}\n{port}\n{selected_baud} baud\n\n{action}? Keep USB connected until complete."):
                 return
-        phase = ["prepare release"]
         def work():
-            try:
-                return perform_work()
-            except PermissionError as error:
-                code = getattr(error, "winerror", None) or getattr(error, "errno", None)
-                raise core.SetupError(
-                    f"Access denied during {phase[0]} (OS error {code or 'unknown'}). "
-                    "Check whether another application has COM4 open or antivirus is "
-                    "locking temporary downloads."
-                ) from error
-
-        def perform_work():
             with tempfile.TemporaryDirectory(prefix="music-controller-") as temp:
                 target = destination or Path(temp)
                 if destination:
                     target.mkdir(exist_ok=False)
-                phase[0] = "release download"
                 core.prepare(selected, profile, target, lambda message: self.events.put((None, message)))
                 if full:
-                    phase[0] = "device provisioning"
                     core.provision(settings, profile, target)
                 if not prepare_only:
                     self.events.put((None, "Flashing device; keep USB connected…"))
-                    phase[0] = "USB firmware flashing"
                     resume = self.monitor.running
                     if resume:
                         self.monitor.stop()
@@ -349,12 +343,11 @@ class Installer:
                     try:
                         core.flash(profile, target, port, full,
                                    log=lambda message: self.events.put((None, message)),
-                                   manual_bootloader=manual_bootloader)
+                                   manual_bootloader=manual_bootloader, baud=selected_baud)
                     finally:
                         if resume:
                             self.monitor.start(port)
                             self.events.put((None, "Serial monitor resumed after flashing"))
-            phase[0] = "complete"
             return f"Prepared: {destination}. Keep NVS private." if prepare_only else "Installation complete. Temporary files removed."
         self.task(work, lambda result: (self.status.set(result),
             messagebox.showinfo("Manual restart", "Flash completed. Press RESET (without BOOT) to run the firmware.")
