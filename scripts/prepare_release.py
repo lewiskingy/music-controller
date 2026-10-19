@@ -77,7 +77,7 @@ def select(requested="", rolling=False):
 
 def verify_bundle(directory, version):
     """Reject partial/mismatched downloads before creating a release or tag."""
-    version_key(version)
+    release_key(version)
     manifest = json.loads((directory / "release-manifest.json").read_text())
     if manifest["version"] != version or manifest["gateway"]["source_tag"] != version:
         raise ValueError("Manifest version does not match the release")
