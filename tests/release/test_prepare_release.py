@@ -153,7 +153,7 @@ def test_rolling_refresh_and_cleanup_only_after_success(bundle, monkeypatch, pub
             return 'new-sha'
         if args == ('git', 'tag', '--list'):
             return 'v0.5.1-rc.1\nv0.5.1-rc.2'
-        if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
+        if args == ('git', 'rev-parse', 'v0.5.1-rc.2^{commit}'):
             return 'old-sha'
         if args[:2] == ('git', 'merge-base'):
             return 'other-sha' if rollback else 'old-sha'
@@ -172,10 +172,10 @@ def test_rolling_refresh_and_cleanup_only_after_success(bundle, monkeypatch, pub
         return
     if upload_fails:
         with pytest.raises(RuntimeError, match='Upload failed'):
-            release.prepare(bundle, 'v0.5.1', rolling=True)
+            release.prepare(bundle, 'v0.5.1-rc.2', rolling=True)
         assert not any('DELETE' in c for c in calls)
         return
-    release.prepare(bundle, 'v0.5.1', rolling=True)
+    release.prepare(bundle, 'v0.5.1-rc.2', rolling=True)
     patch = next(i for i,c in enumerate(calls) if 'PATCH' in c)
     upload = next(i for i,c in enumerate(calls) if c[:3] == ('gh', 'release', 'upload'))
     edit = next(i for i,c in enumerate(calls) if c[:3] == ('gh', 'release', 'edit'))
