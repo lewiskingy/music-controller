@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optional vMAJOR.MINOR.PATCH override (blank = refresh rolling draft or next patch)'
+        description: 'Optional vMAJOR.MINOR.PATCH-rc.N override (blank = rolling RC). Stable vX.Y.Z from manually triggered/tagged build'
         type: string
         default: ''
 permissions:

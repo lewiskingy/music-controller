@@ -1,6 +1,8 @@
 """Tk interface. Network and flashing work run outside the UI thread."""
 from pathlib import Path
 from datetime import datetime
+import json
+import os
 from tkinter import scrolledtext
 import queue
 import tempfile
@@ -31,6 +33,10 @@ class Installer:
         ttk.Label(frame, text="Music Controller", font=("Segoe UI", 20)).pack(anchor="w")
         ttk.Label(frame, text="Connect your controller by USB, then choose a release.").pack(anchor="w", pady=8)
         self.controls = []
+        self.include_prerelease = tk.BooleanVar(value=self.load_prerelease())
+        channel = ttk.Checkbutton(frame, text="Include Pre-release versions",
+                                  variable=self.include_prerelease, command=self.change_channel)
+        channel.pack(anchor="w", pady=(2, 4))
         self.release = self.combo(frame, "Release", self.select_release)
         self.profile = self.combo(frame, "Hardware")
         self.port = self.combo(frame, "USB port")
@@ -111,7 +117,7 @@ class Installer:
 
     def check_update(self):
         try:
-            info = update.release_info()
+            info = update.release_info(self.include_prerelease.get())
             if info:
                 self.events.put((self.update_available, info))
         except Exception:
@@ -132,6 +138,27 @@ class Installer:
         except Exception as error:
             return self.failed("Could not start verified update: " + type(error).__name__)
         self.root.destroy()
+
+    @staticmethod
+    def channel_file():
+        return Path(os.environ.get("APPDATA", str(Path.home()))) / "MusicController" / "installer.json"
+
+    @classmethod
+    def load_prerelease(cls):
+        try:
+            return bool(json.loads(cls.channel_file().read_text()).get("include_prerelease", False))
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def change_channel(self):
+        try:
+            path = self.channel_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"include_prerelease": self.include_prerelease.get()}))
+        except OSError:
+            pass
+        self.refresh()
+        threading.Thread(target=self.check_update, daemon=True).start()
 
     def show_serial(self):
         if self.serial_visible.get():
@@ -245,8 +272,9 @@ class Installer:
         self.task(lambda: (core.releases(), core.ports()), self.refreshed)
 
     def refreshed(self, result):
-        self.available, self.devices = result
-        self.release["values"] = [r["tag_name"] for r in self.available]
+        self.all_releases, self.devices = result
+        self.available = [r for r in self.all_releases if self.include_prerelease.get() or not r['prerelease']]
+        self.release["values"] = [r["tag_name"] + (" (Pre-release)" if r["prerelease"] else "") for r in self.available]
         self.port["values"] = [f"{port} — {name}" for port, name in self.devices]
         if self.devices:
             self.port.current(0)

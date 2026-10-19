@@ -35,12 +35,12 @@ def download(url, limit=MAX_DOWNLOAD):
     return data
 
 
-def releases():
+def releases(include_prerelease=True):
     """Only releases containing an installer manifest are installable."""
     result = []
     for page in range(1, 11):
         batch = json.loads(download(f"{API}/releases?per_page=100&page={page}", 4 * 1024 * 1024))
-        result.extend(r for r in batch if not r["draft"] and any(
+        result.extend(r for r in batch if not r["draft"] and (include_prerelease or not r["prerelease"]) and any(
             a["name"] == MANIFEST for a in r["assets"]))
         if len(batch) < 100:
             break
@@ -52,7 +52,7 @@ def release(tag=None):
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", tag):
             raise SetupError("Expected a release tag such as v0.5.0")
         return json.loads(download(f"{API}/releases/tags/{tag}"))
-    return next((r for r in releases() if not r["prerelease"]), None) or _no_release()
+    return next((r for r in releases(include_prerelease=False)), None) or _no_release()
 
 
 def _no_release():

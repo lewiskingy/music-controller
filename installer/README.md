@@ -105,3 +105,7 @@ record the failing USB stage and OS error for troubleshooting. Do not use
 ## Serial Monitor
 
 Expand **Serial Monitor · Diagnostics** and choose **Start monitoring** on the selected COM port to watch 115200-baud device logs. Copy, clear or save the bounded log as needed. Before a USB flash, the monitor closes the port and resumes afterwards if it was running. Other serial-monitor applications must be closed before flashing. Saved logs may contain sensitive network information.
+
+## Release channels
+
+By default Windows Setup lists published stable releases and checks for stable installer updates. Tick **Include Pre-release versions** to additionally list published `vX.Y.Z-rc.N` releases and receive candidate self-update offers. The choice persists under `%APPDATA%/MusicController/installer.json`. Unpublished drafts are never selectable. Untick to return to stable-only releases. A published pre-release remains a distinct immutable test build; see [release policy](../docs/releases.md).

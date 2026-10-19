@@ -5,7 +5,7 @@ from music_controller_setup import update
 
 
 @pytest.mark.parametrize(("value", "expected"), [
-    ("0.5.6", (0, 5, 6)), ("v1.20.3", (1, 20, 3)),
+    ("0.5.6", (0, 5, 6, 1, 0)), ("v1.20.3", (1, 20, 3, 1, 0)), ("v1.20.4-rc.2", (1, 20, 4, 0, 2)),
     ("main", None), ("v0.5.6-rc1", None), ("0.5", None),
 ])
 def test_version(value, expected):
@@ -26,8 +26,7 @@ def test_latest_stable_and_digest_required():
                     "https://github.com/lewiskingy/music-controller/releases/download/v0.5.7/music-controller-setup.exe",
                     "digest": "sha256:" + "a" * 64}],
     }
-    with patch.object(update, "VERSION", "0.5.6"), patch.object(update.sys, "frozen", True, create=True), patch.object(update.core, "download",
-            side_effect=lambda *args, **kwargs: __import__("json").dumps(release).encode()):
+    with patch.object(update, "VERSION", "0.5.6"), patch.object(update.sys, "frozen", True, create=True), patch.object(update.core, "release", return_value=release):
         assert update.release_info()["version"] == "v0.5.7"
         release["assets"][0]["digest"] = ""
         assert update.release_info() is None
@@ -37,3 +36,16 @@ def test_stage_rejects_mismatched_digest():
     with patch.object(update.core, "download", return_value=b"untrusted"):
         with pytest.raises(update.core.SetupError):
             update.stage({"url": "https://github.com/example", "sha256": "a" * 64})
+
+def test_prerelease_channel_is_opt_in():
+    def make(tag, prerelease):
+        return {"tag_name": tag, "draft": False, "prerelease": prerelease,
+                "assets": [{"name": update.ASSET, "browser_download_url": "https://github.com/a",
+                            "digest": "sha256:" + "b" * 64}]}
+    stable = make("v0.5.13", False)
+    candidate = make("v0.5.14-rc.2", True)
+    with patch.object(update, "VERSION", "0.5.13"), patch.object(update.sys, "frozen", True, create=True), \
+         patch.object(update.core, "release", return_value=stable), \
+         patch.object(update.core, "releases", return_value=[candidate, stable]):
+        assert update.release_info() is None
+        assert update.release_info(True)["version"] == "v0.5.14-rc.2"

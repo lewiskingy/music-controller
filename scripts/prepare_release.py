@@ -7,27 +7,36 @@ from pathlib import Path
 import re
 import subprocess
 
-VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+STABLE = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?\Z")
+
+
+def release_key(value):
+    match = VERSION.fullmatch(value)
+    if not match:
+        raise ValueError(f"Expected vMAJOR.MINOR.PATCH[-rc.N], got {value!r}")
+    major, minor, patch, rc = match.groups()
+    return (int(major), int(minor), int(patch), 0 if rc else 1, int(rc or 0))
 
 
 def version_key(value):
-    match = VERSION.fullmatch(value)
+    match = STABLE.fullmatch(value)
     if not match:
         raise ValueError(f"Expected vMAJOR.MINOR.PATCH, got {value!r}")
-    return tuple(map(int, match.groups()))
+    return tuple(map(int, match.groups()[:3]))
 
 
 def choose_version(tags, commit_tags, requested=""):
     """Reuse this commit's version on retry; otherwise allocate above all tags."""
     if requested:
-        version_key(requested)
+        release_key(requested)
         if requested in tags and requested not in commit_tags:
             raise ValueError("Requested version already belongs to another commit")
         return requested
-    existing = [tag for tag in commit_tags if VERSION.fullmatch(tag)]
+    existing = [tag for tag in commit_tags if STABLE.fullmatch(tag)]
     if existing:
         return max(existing, key=version_key)
-    versions = [version_key(tag) for tag in tags if VERSION.fullmatch(tag)]
+    versions = [version_key(tag) for tag in tags if STABLE.fullmatch(tag)]
     major, minor, patch = max(versions, default=(0, 0, 0))
     return f"v{major}.{minor}.{patch + 1}"
 
@@ -44,24 +53,25 @@ def releases():
 
 
 def rolling_version(tags, commit_tags, records, requested=""):
-    """Prefer the highest unpublished candidate above all published versions."""
-    published = [version_key(r["tag_name"]) for r in records
-                 if not r["draft"] and VERSION.fullmatch(r["tag_name"])]
-    floor = max(published, default=(-1, -1, -1))
-    drafts = [r["tag_name"] for r in records if r["draft"]
-              and VERSION.fullmatch(r["tag_name"])
-              and version_key(r["tag_name"]) > floor]
+    """One mutable RC draft, advancing RC number after each published candidate."""
     if requested:
-        version_key(requested)
-        if requested in drafts:
-            return requested
-        if version_key(requested) <= floor:
-            raise ValueError("Rolling draft must be newer than published releases")
-        return choose_version(tags, commit_tags, requested)
+        release_key(requested)
+        if STABLE.fullmatch(requested):
+            raise ValueError("Rolling draft must use a -rc.N version")
+        if any(r["tag_name"] == requested and not r["draft"] for r in records):
+            raise ValueError("Published release candidates cannot be overwritten")
+        return requested
+    published_stable = [version_key(r["tag_name"]) for r in records
+                        if not r["draft"] and STABLE.fullmatch(r["tag_name"])]
+    latest_stable = max(published_stable, default=(0, 0, 0))
+    base = f"v{latest_stable[0]}.{latest_stable[1]}.{latest_stable[2] + 1}"
+    drafts = [r["tag_name"] for r in records if r["draft"] and
+              re.fullmatch(re.escape(base) + r"-rc\.[1-9]\d*", r["tag_name"])]
     if drafts:
-        return max(drafts, key=version_key)
-    # Never reuse a published version, even when retrying its original commit.
-    return choose_version(tags, [])
+        return max(drafts, key=release_key)
+    existing = [int(r["tag_name"].split("-rc.")[1]) for r in records
+                if re.fullmatch(re.escape(base) + r"-rc\.[1-9]\d*", r["tag_name"])]
+    return f"{base}-rc.{max(existing, default=0) + 1}"
 
 
 def select(requested="", rolling=False):
@@ -76,7 +86,7 @@ def select(requested="", rolling=False):
 
 def verify_bundle(directory, version):
     """Reject partial/mismatched downloads before creating a release or tag."""
-    version_key(version)
+    release_key(version)
     manifest = json.loads((directory / "release-manifest.json").read_text())
     if manifest["version"] != version or manifest["gateway"]["source_tag"] != version:
         raise ValueError("Manifest version does not match the release")
@@ -154,7 +164,7 @@ def prepare(directory, version, rolling=False):
     if rolling:
         # Refresh generated notes as commits accumulate; a staging draft is mutable.
         published = [r["tag_name"] for r in records if not r["draft"]
-                     and VERSION.fullmatch(r["tag_name"])]
+                     and STABLE.fullmatch(r["tag_name"])]
         previous = (["-f", f"previous_tag_name={max(published, key=version_key)}"]
                     if published else [])
         notes = json.loads(run(
@@ -172,7 +182,7 @@ def prepare(directory, version, rolling=False):
         # Retain their tags so existing references are not silently invalidated.
         for old in releases():
             if (old["draft"] and VERSION.fullmatch(old["tag_name"])
-                    and version_key(old["tag_name"]) < version_key(version)):
+                    and release_key(old["tag_name"]) < release_key(version)):
                 run("gh", "api", f"repos/{repo}/releases/{old['id']}",
                     "--method", "DELETE")
     print(f"Draft ready: {url}")
@@ -180,7 +190,7 @@ def prepare(directory, version, rolling=False):
         with open(summary, "a") as stream:
             stream.write(f"## Draft release ready\n\n[{version}]({url}) · commit `{sha}`\n\n"
                          "Review release notes and test the assets, then edit the draft, "
-                         "leave Pre-release unchecked, select Set as latest release and Publish release. "
+                         "select Pre-release for -rc.N builds, and Publish release. "
                          "This workflow does not publish or deploy anything.\n")
 
 
