@@ -1,24 +1,30 @@
 """Tk interface. Network and flashing work run outside the UI thread."""
 from pathlib import Path
+from datetime import datetime
+from tkinter import scrolledtext
 import queue
 import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from . import core, update
+from .serial_monitor import SerialMonitor
 
 
 class Installer:
     def __init__(self, root):
         self.root = root
         self.events = queue.Queue()
+        self.serial_events = queue.Queue()
+        self.monitor = SerialMonitor(self.serial_events.put)
+        self.serial_lines = []
         self.busy = False
         self.selected = None
         self.data = None
         self.available = []
         root.title(f"Music Controller Setup {update.VERSION}")
-        root.geometry("720x820")
-        root.minsize(680, 820)
+        root.geometry("720x850")
+        root.minsize(680, 850)
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
@@ -79,6 +85,22 @@ class Installer:
             button.pack_configure(side="left", expand=True, padx=2)
         self.button(frame, "Install selected release…", lambda: self.install(False))
         self.button(frame, "Prepare files only…", lambda: self.install(True))
+        self.monitor_panel = ttk.LabelFrame(frame, text="Serial Monitor · Diagnostics", padding=1)
+        self.monitor_panel.pack(fill="both", expand=True, pady=0)
+        serial_row = ttk.Frame(self.monitor_panel)
+        serial_row.pack(fill="x")
+        self.serial_button = ttk.Button(serial_row, text="Start monitoring", command=self.toggle_monitor)
+        self.serial_button.pack(side="left", padx=2)
+        self.controls.append(self.serial_button)
+        ttk.Button(serial_row, text="Copy", command=self.copy_serial).pack(side="left", padx=2)
+        ttk.Button(serial_row, text="Save log…", command=self.save_serial).pack(side="left", padx=2)
+        ttk.Button(serial_row, text="Clear", command=self.clear_serial).pack(side="left", padx=2)
+        self.serial_visible = tk.BooleanVar(value=False)
+        ttk.Checkbutton(serial_row, text="Show logs", variable=self.serial_visible,
+                        command=self.show_serial).pack(side="right")
+        self.serial_text = scrolledtext.ScrolledText(self.monitor_panel, height=8, wrap="none",
+                                                   state="disabled", font=("Consolas", 9))
+        self.show_serial()
         self.progress = ttk.Progressbar(frame, mode="indeterminate")
         self.progress.pack(fill="x", pady=8)
         self.status = tk.StringVar(value="Loading releases…")
@@ -111,6 +133,60 @@ class Installer:
             return self.failed("Could not start verified update: " + type(error).__name__)
         self.root.destroy()
 
+    def show_serial(self):
+        if self.serial_visible.get():
+            self.serial_text.pack(fill="both", expand=True, pady=4)
+            self.serial_text.configure(state="normal")
+            self.serial_text.delete("1.0", "end")
+            self.serial_text.insert("end", "\n".join(self.serial_lines) + ("\n" if self.serial_lines else ""))
+            self.serial_text.see("end")
+            self.serial_text.configure(state="disabled")
+        else:
+            self.serial_text.pack_forget()
+
+    def append_serial(self, message):
+        line = datetime.now().strftime("%H:%M:%S") + "  " + str(message)
+        self.serial_lines.append(line)
+        if len(self.serial_lines) > 1500:
+            self.serial_lines = self.serial_lines[-1500:]
+        if self.serial_visible.get():
+            self.serial_text.configure(state="normal")
+            self.serial_text.insert("end", line + "\n")
+            if int(self.serial_text.index("end-1c").split(".")[0]) > 1501:
+                self.serial_text.delete("1.0", "3.0")
+            self.serial_text.see("end")
+            self.serial_text.configure(state="disabled")
+
+    def toggle_monitor(self):
+        if self.monitor.running:
+            self.monitor.stop()
+            self.serial_button.configure(text="Start monitoring")
+            return
+        if self.busy:
+            return
+        if self.port.current() < 0:
+            return messagebox.showerror("Serial monitor", "Select a USB port first.")
+        self.serial_visible.set(True)
+        self.show_serial()
+        self.monitor.start(self.devices[self.port.current()][0])
+        self.serial_button.configure(text="Stop monitoring")
+
+    def copy_serial(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append("\n".join(self.serial_lines))
+
+    def save_serial(self):
+        target = filedialog.asksaveasfilename(defaultextension=".log",
+                                             filetypes=[("Text log", "*.log"), ("All files", "*.*")])
+        if target:
+            Path(target).write_text("\n".join(self.serial_lines) + "\n", encoding="utf-8")
+
+    def clear_serial(self):
+        self.serial_lines.clear()
+        self.serial_text.configure(state="normal")
+        self.serial_text.delete("1.0", "end")
+        self.serial_text.configure(state="disabled")
+
     def combo(self, parent, label, callback=None):
         ttk.Label(parent, text=label).pack(anchor="w")
         box = ttk.Combobox(parent, state="readonly")
@@ -141,6 +217,11 @@ class Installer:
         threading.Thread(target=worker, daemon=True).start()
 
     def poll(self):
+        for _ in range(100):
+            try:
+                self.append_serial(self.serial_events.get_nowait())
+            except queue.Empty:
+                break
         try:
             while True:
                 callback, value = self.events.get_nowait()
@@ -255,8 +336,18 @@ class Installer:
                     core.provision(settings, profile, target)
                 if not prepare_only:
                     self.events.put((None, "Flashing device; keep USB connected…"))
-                    core.flash(profile, target, port, full, log=lambda message: self.events.put((None, message)),
-                               manual_bootloader=manual_bootloader, baud=selected_baud)
+                    resume = self.monitor.running
+                    if resume:
+                        self.monitor.stop()
+                        self.events.put((None, "Serial monitor paused for flashing"))
+                    try:
+                        core.flash(profile, target, port, full,
+                                   log=lambda message: self.events.put((None, message)),
+                                   manual_bootloader=manual_bootloader, baud=selected_baud)
+                    finally:
+                        if resume:
+                            self.monitor.start(port)
+                            self.events.put((None, "Serial monitor resumed after flashing"))
             return f"Prepared: {destination}. Keep NVS private." if prepare_only else "Installation complete. Temporary files removed."
         self.task(work, lambda result: (self.status.set(result),
             messagebox.showinfo("Manual restart", "Flash completed. Press RESET (without BOOT) to run the firmware.")
@@ -266,6 +357,7 @@ class Installer:
         if self.busy:
             messagebox.showinfo("Operation in progress", "Wait for the current operation to finish before closing.")
             return
+        self.monitor.stop()
         self.root.destroy()
 
 

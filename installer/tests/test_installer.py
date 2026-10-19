@@ -204,7 +204,7 @@ def test_windows_gui_initialization(package):
             assert app.mode.get() == "Update existing device"
             assert app.status.get().startswith("Ready")
             assert app.settings["wifi_sleep"].get() is False
-            assert root.winfo_reqheight() <= 820
+            assert root.winfo_reqheight() <= 850
     finally:
         root.destroy()
 

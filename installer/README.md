@@ -102,10 +102,6 @@ record the failing USB stage and OS error for troubleshooting. Do not use
 **Set up new device** unless you intend to erase and provision NVS.
 
 
-## Flashing speed
+## Serial Monitor
 
-The GUI has a **Flashing speed** dropdown with **460800 baud** (default) and
-**115200 baud** (slower, compatibility fallback). The selected speed applies to
-both automatic and manual BOOT modes, including partition verification and writing.
-The CLI also accepts `--baud 115200`. If the faster rate fails, try 115200 after
-re-entering BOOT mode. Changing speed never erases NVS or changes the reset policy.
+Expand **Serial Monitor · Diagnostics** and choose **Start monitoring** on the selected COM port to watch 115200-baud device logs. Copy, clear or save the bounded log as needed. Before a USB flash, the monitor closes the port and resumes afterwards if it was running. Other serial-monitor applications must be closed before flashing. Saved logs may contain sensitive network information.
