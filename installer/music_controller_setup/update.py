@@ -25,7 +25,7 @@ _handle = None
 
 
 def version_tuple(value):
-    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value or "")
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-rc\.([1-9]\d*))?", value or "")
     return (*map(int, match.groups()[:3]), 0 if match.group(4) else 1, int(match.group(4) or 0)) if match else None
 
 
