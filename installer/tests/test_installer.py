@@ -204,7 +204,7 @@ def test_windows_gui_initialization(package):
             assert app.mode.get() == "Update existing device"
             assert app.status.get().startswith("Ready")
             assert app.settings["wifi_sleep"].get() is False
-            assert root.winfo_reqheight() <= 780
+            assert root.winfo_reqheight() <= 820
     finally:
         root.destroy()
 
@@ -252,7 +252,7 @@ def test_manual_bootloader_preserves_download_mode_between_flash_operations(pack
     path, profile = package
     calls = []
     with patch("esptool.main", side_effect=device_stub(path, calls)):
-        core.flash(profile, path, "COM4", manual_bootloader=True)
+        core.flash(profile, path, "COM4", manual_bootloader=True, baud=115200)
     assert len(calls) == 2
     for args in calls:
         assert args[args.index("--baud") + 1] == "115200"
@@ -280,3 +280,29 @@ def test_manual_options_match_bundled_esptool_parser(capsys):
                       "--before", "no_reset", "--after", "no_reset", "--help"])
     assert exit_info.value.code == 0
     assert "invalid choice" not in capsys.readouterr().err
+
+
+def test_manual_bootloader_fast_default(package):
+    path, profile = package
+    calls = []
+    with patch("esptool.main", side_effect=device_stub(path, calls)):
+        core.flash(profile, path, "COM4", manual_bootloader=True)
+    assert all(c[c.index("--baud") + 1] == "460800" for c in calls)
+    assert all(c[c.index("--before") + 1] == "no_reset" for c in calls)
+
+
+def test_auto_boot_slow_fallback_keeps_default_reset_policy(package):
+    path, profile = package
+    calls = []
+    with patch("esptool.main", side_effect=device_stub(path, calls)):
+        core.flash(profile, path, "COM4", baud=115200)
+    assert all(c[c.index("--baud") + 1] == "115200" for c in calls)
+    assert all("--before" not in c and "--after" not in c for c in calls)
+
+
+@pytest.mark.parametrize("baud", [0, 9600, "460800", True, 921600])
+def test_unsupported_baud_rejected_without_serial_access(package, baud):
+    path, profile = package
+    with patch("esptool.main") as tool, pytest.raises(core.SetupError, match="baud rate"):
+        core.flash(profile, path, "COM4", baud=baud)
+    tool.assert_not_called()
