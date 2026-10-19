@@ -15,7 +15,8 @@ def main(argv=None):
     parser.add_argument("--rel")
     parser.add_argument("--profile")
     parser.add_argument("--port")
-    parser.add_argument("--manual-bootloader", action="store_true", help="Use 115200 baud and suppress reset between flash stages; enter BOOT mode first")
+    parser.add_argument("--manual-bootloader", action="store_true", help="Suppress automatic reset between flashing stages; enter BOOT mode first")
+    parser.add_argument("--baud", type=int, choices=(115200, 460800), default=460800, help="Flash baud rate (default: 460800)")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--keep-files", type=Path, metavar="DIRECTORY")
     parser.add_argument("--export-gateway", type=Path, metavar="FILE")
@@ -85,7 +86,7 @@ def main(argv=None):
             if settings:
                 core.provision(settings, profile, destination)
             if not args.prepare_only:
-                core.flash(profile, destination, port, full=bool(settings), manual_bootloader=args.manual_bootloader)
+                core.flash(profile, destination, port, full=bool(settings), manual_bootloader=args.manual_bootloader, baud=args.baud)
             print("Complete.")
             if args.keep_files:
                 print("Retained files:", destination, "— provisioning files contain credentials.")
