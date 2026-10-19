@@ -7,10 +7,8 @@ from pathlib import Path
 import re
 import subprocess
 
-VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
-
-STABLE = re.compile(r"v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\Z")
-VERSION = re.compile(r"v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-rc\\.([1-9]\\d*))?\\Z")
+STABLE = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?\Z")
 
 
 def release_key(value):
@@ -68,11 +66,11 @@ def rolling_version(tags, commit_tags, records, requested=""):
     latest_stable = max(published_stable, default=(0, 0, 0))
     base = f"v{latest_stable[0]}.{latest_stable[1]}.{latest_stable[2] + 1}"
     drafts = [r["tag_name"] for r in records if r["draft"] and
-              re.fullmatch(re.escape(base) + r"-rc\\.[1-9]\\d*", r["tag_name"])]
+              re.fullmatch(re.escape(base) + r"-rc\.[1-9]\d*", r["tag_name"])]
     if drafts:
         return max(drafts, key=release_key)
     existing = [int(r["tag_name"].split("-rc.")[1]) for r in records
-                if re.fullmatch(re.escape(base) + r"-rc\\.[1-9]\\d*", r["tag_name"])]
+                if re.fullmatch(re.escape(base) + r"-rc\.[1-9]\d*", r["tag_name"])]
     return f"{base}-rc.{max(existing, default=0) + 1}"
 
 
