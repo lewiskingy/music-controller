@@ -90,7 +90,7 @@ def test_prepare_never_publishes_or_changes_an_existing_published_release(bundle
             return 'source-sha'
         if args == ('git', 'tag', '--list'):
             return '' if state == 'new' else 'v0.5.1'
-        if args == ('git', 'rev-parse', 'v0.5.1-rc.2^{commit}'):
+        if args == ('git', 'rev-parse', 'v0.5.1^{commit}'):
             return 'other-sha' if state == 'collision' else 'source-sha'
         if args[:4] == ('gh', 'api', '--paginate', '--slurp'):
             return json.dumps([[] if state == 'new' else [dict(tag_name='v0.5.1', draft=state in ['draft', 'collision'], html_url='https://example/release')]])
