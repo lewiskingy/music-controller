@@ -100,3 +100,12 @@ This mode avoids automatic resets **between** esptool operations, but still
 reopens the COM port. If Windows denies access, close other COM-port owners and
 record the failing USB stage and OS error for troubleshooting. Do not use
 **Set up new device** unless you intend to erase and provision NVS.
+
+
+## Flashing speed
+
+The GUI has a **Flashing speed** dropdown with **460800 baud** (default) and
+**115200 baud** (slower, compatibility fallback). The selected speed applies to
+both automatic and manual BOOT modes, including partition verification and writing.
+The CLI also accepts `--baud 115200`. If the faster rate fails, try 115200 after
+re-entering BOOT mode. Changing speed never erases NVS or changes the reset policy.
