@@ -66,3 +66,7 @@ Preserve upstream notices and distinguish original code from bundled dependencie
 provider trademarks and manufacturer models. Include project licensing files when
 adding release packages. Do not claim frozen installers or containers contain only
 Apache-licensed material; esptool and other dependencies retain their own terms.
+
+## Release channels
+
+Do not publish or modify stable releases from ordinary merges. CI prepares one rolling `vX.Y.Z-rc.N` draft from `main`; maintainers publish it with the GitHub **Pre-release** checkbox. Published candidates must not be overwritten. Later fixes yield `-rc.N+1`. Promote by preparing `vX.Y.Z` from the exact validated candidate commit/tag, then publish as **Latest**. The installer defaults to stable only, with opt-in pre-release firmware and self-updates. Preserve immutable published artifacts, manifest versions and checksums. See `docs/releases.md`.

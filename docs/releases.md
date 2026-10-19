@@ -78,3 +78,7 @@ or new secret is needed. Repository/organization rules must permit updating
 unpublished candidate tags and writing draft releases.
 
 Implementation: [release workflow](../.github/workflows/release-prototype.yml), [release helper](../scripts/prepare_release.py), [tests](../tests/release/test_prepare_release.py). Creating the tag and uploading assets happen in the same workflow, so tag-trigger recursion is not required.
+
+## Pre-release candidate workflow (current policy)
+
+Normal merges refresh a rolling draft tagged `vMAJOR.MINOR.PATCH-rc.N` rather than a stable draft. Publish it with **This is a pre-release** selected, not Latest. Further merges must create `-rc.(N+1)`; published candidates are never overwritten. Installers default to stable; the **Include Pre-release versions** checkbox persists opt-in to candidate firmware and installer self-updates. To promote, manually run **Prepare draft release** on the exact tested candidate commit/tag with stable `vMAJOR.MINOR.PATCH`, review its artifacts, then publish without Pre-release and mark Latest. Do not assume publishing a candidate as stable merely changes its tag. Existing historical `vX.Y.Z` drafts should not be published as the new candidate model; delete outdated drafts manually after verifying newer candidates.

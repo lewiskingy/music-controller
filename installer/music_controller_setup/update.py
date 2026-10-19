@@ -26,7 +26,7 @@ _handle = None
 
 def version_tuple(value):
     match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value or "")
-    return tuple(map(int, match.groups())) if match else None
+    return (*map(int, match.groups()[:3]), 0 if match.group(4) else 1, int(match.group(4) or 0)) if match else None
 
 
 def single_instance():
@@ -46,26 +46,22 @@ def single_instance():
     return True
 
 
-def release_info():
-    """Only GitHub's latest *published stable* release, never rolling drafts."""
+def release_info(include_prerelease=False):
+    """Find newest permitted published installer, never draft releases."""
     if not getattr(sys, "frozen", False) or VERSION == "0.0.0" or version_tuple(VERSION) is None:
         return None
-    current = version_tuple(VERSION)
-    release = json.loads(core.download(core.API + "/releases/latest", 1024 * 1024))
-    if release.get("draft") or release.get("prerelease"):
-        return None
-    newer = version_tuple(release.get("tag_name"))
-    if newer is None or newer <= current:
-        return None
-    asset = next((a for a in release.get("assets", []) if a.get("name") == ASSET), None)
-    if not asset:
-        return None
-    digest = asset.get("digest", "")
-    if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest):
-        # Fail closed on integrity metadata rather than trusting a mutable URL.
-        return None
-    return {"version": release["tag_name"], "url": asset["browser_download_url"],
-            "sha256": digest.split(":", 1)[1]}
+    candidates = core.releases() if include_prerelease else [core.release()]
+    eligible = sorted((r for r in candidates if not r.get("draft") and
+                       (include_prerelease or not r.get("prerelease")) and
+                       version_tuple(r.get("tag_name")) is not None and
+                       version_tuple(r["tag_name"]) > version_tuple(VERSION)),
+                      key=lambda r: version_tuple(r["tag_name"]), reverse=True)
+    for release in eligible:
+        asset = next((a for a in release.get("assets", []) if a.get("name") == ASSET), None)
+        if asset and re.fullmatch(r"sha256:[a-f0-9]{64}", asset.get("digest", "")):
+            return {"version": release["tag_name"], "url": asset["browser_download_url"],
+                    "sha256": asset["digest"].split(":", 1)[1]}
+    return None
 
 
 def minimum_version(manifest):

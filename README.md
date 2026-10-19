@@ -65,3 +65,7 @@ Bug reports, improvements and hardware testing are welcome. Read **[CONTRIBUTING
 ## License
 
 Music Controller's original code, documentation, artwork and enclosure designs are open source under the **[Apache License 2.0](LICENSE)**, except where otherwise noted. You may use, modify and redistribute them, including commercially, subject to the licence. Publishing modifications is not required. See [NOTICE](NOTICE) and [third-party materials](THIRD_PARTY.md) for attribution and separately licensed components.
+
+## Release channels
+
+Merges to `main` refresh a rolling **draft release candidate** (`vX.Y.Z-rc.N`). Publish it as a GitHub **Pre-release** for opt-in testing; it stays immutable thereafter. Subsequent merges generate `-rc.N+1`. Once approved, build/publish `vX.Y.Z` from the *tested commit* as the stable **Latest**. Windows Setup defaults to stable releases; enable **Include Pre-release versions** to select/test candidates and receive candidate installer updates. See [release operations](docs/releases.md).
