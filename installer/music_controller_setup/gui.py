@@ -17,8 +17,8 @@ class Installer:
         self.data = None
         self.available = []
         root.title(f"Music Controller Setup {update.VERSION}")
-        root.geometry("720x780")
-        root.minsize(680, 780)
+        root.geometry("720x820")
+        root.minsize(680, 820)
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
